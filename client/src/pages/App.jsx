@@ -78,6 +78,7 @@ export default function App() {
   const [users, setUsers] = useState([]);
   const [activity, setActivity] = useState([]);
   const [newUser, setNewUser] = useState({ name: '', email: '', password: '', role: 'editor' });
+  const [editingUser, setEditingUser] = useState(null);
   const [title, setTitle] = useState('');
   const [files, setFiles] = useState([]);
   const [youtubeUrl, setYoutubeUrl] = useState('');
@@ -481,13 +482,30 @@ export default function App() {
     }
   }
 
-  async function changeRole(id, role) {
+  function startEditingUser(user) {
+    setEditingUser({ id: user._id, name: user.name, email: user.email, role: user.role, password: '' });
+  }
+
+  async function updateUser(e) {
+    e.preventDefault();
+    setBusy(true);
     try {
-      await api.patch(`/auth/users/${id}/role`, { role });
-      setError('Team role updated.');
+      const { data } = await api.patch(`/auth/users/${editingUser.id}`, {
+        name: editingUser.name,
+        email: editingUser.email,
+        role: editingUser.role,
+        password: editingUser.password,
+      });
+      if (String(data.id) === String(currentUser?.id)) {
+        setCurrentUser(user => ({ ...user, ...data }));
+      }
+      setEditingUser(null);
+      setError('Account updated.');
       await loadTeam();
     } catch (e) {
-      setError(e.response?.data?.error || 'Could not update team role');
+      setError(e.response?.data?.error || 'Could not update account');
+    } finally {
+      setBusy(false);
     }
   }
 
@@ -569,14 +587,53 @@ export default function App() {
             <div className="cards">
               {users.map(user => (
                 <article className="podcard" key={user._id}>
-                  <h3>{user.name}</h3>
-                  <p className="muted">{user.email}</p>
-                  <select value={user.role} disabled={user._id === currentUser.id} onChange={e => changeRole(user._id, e.target.value)}>
-                    <option value="admin">Admin</option>
-                    <option value="editor">Editor</option>
-                    <option value="viewer">Viewer</option>
-                  </select>
-                  {user._id === currentUser.id && <small className="muted">Your admin role is protected.</small>}
+                  {editingUser?.id === user._id ? (
+                    <form className="account-edit-form" onSubmit={updateUser}>
+                      <h3>Edit account</h3>
+                      <input
+                        value={editingUser.name}
+                        onChange={e => setEditingUser({ ...editingUser, name: e.target.value })}
+                        placeholder="Name"
+                        required
+                      />
+                      <input
+                        type="email"
+                        value={editingUser.email}
+                        onChange={e => setEditingUser({ ...editingUser, email: e.target.value })}
+                        placeholder="Email"
+                        required
+                      />
+                      <select
+                        value={editingUser.role}
+                        disabled={user._id === currentUser.id}
+                        onChange={e => setEditingUser({ ...editingUser, role: e.target.value })}
+                      >
+                        <option value="admin">Admin</option>
+                        <option value="editor">Editor</option>
+                        <option value="viewer">Viewer</option>
+                      </select>
+                      <input
+                        type="password"
+                        value={editingUser.password}
+                        onChange={e => setEditingUser({ ...editingUser, password: e.target.value })}
+                        placeholder="New password (optional, 12+ characters)"
+                        minLength="12"
+                        autoComplete="new-password"
+                      />
+                      <div className="account-actions">
+                        <button type="submit" disabled={busy}>Save account</button>
+                        <button type="button" className="secondary" onClick={() => setEditingUser(null)} disabled={busy}>Cancel</button>
+                      </div>
+                      {user._id === currentUser.id && <small className="muted">Your admin role is protected.</small>}
+                    </form>
+                  ) : (
+                    <>
+                      <h3>{user.name}</h3>
+                      <p className="muted">{user.email}</p>
+                      <span className="status">{user.role}</span>
+                      <button className="secondary" onClick={() => startEditingUser(user)}>Edit account</button>
+                    </>
+                  )}
                 </article>
               ))}
             </div>

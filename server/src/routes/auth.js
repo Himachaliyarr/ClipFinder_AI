@@ -126,6 +126,50 @@ r.post(
   }),
 );
 r.patch(
+  "/users/:id",
+  auth,
+  allow("admin"),
+  wrap(async (req, res) => {
+    if (!mongoose.isValidObjectId(req.params.id)) return res.status(400).json({ error: "Invalid user id" });
+    const name = String(req.body?.name || "").trim();
+    const email = String(req.body?.email || "").trim().toLowerCase();
+    const role = req.body?.role;
+    const password = req.body?.password;
+    if (!name || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))
+      return res.status(400).json({ error: "Name and a valid email are required" });
+    if (!["admin", "editor", "viewer"].includes(role))
+      return res.status(400).json({ error: "Role must be admin, editor or viewer" });
+    if (password !== undefined && password !== "" && (typeof password !== "string" || password.length < 12))
+      return res.status(400).json({ error: "A new password must be at least 12 characters" });
+    if (String(req.user.id) === req.params.id && role !== "admin")
+      return res.status(400).json({ error: "You cannot remove your own admin role" });
+
+    const user = await User.findById(req.params.id);
+    if (!user) return res.status(404).json({ error: "User not found" });
+    if (await User.findOne({ email, _id: { $ne: user._id } }))
+      return res.status(409).json({ error: "Email already registered" });
+
+    const changedFields = [];
+    if (user.name !== name) changedFields.push("name");
+    if (user.email !== email) changedFields.push("email");
+    if (user.role !== role) changedFields.push("role");
+    if (password) changedFields.push("passwordReset");
+    user.name = name;
+    user.email = email;
+    user.role = role;
+    if (password) user.passwordHash = await bcrypt.hash(password, 12);
+    await user.save();
+    await Activity.create({
+      user: req.user.id,
+      action: "user_updated",
+      entityType: "User",
+      entityId: user._id,
+      details: { changedFields },
+    });
+    res.json({ id: user.id, name: user.name, email: user.email, role: user.role });
+  }),
+);
+r.patch(
   "/users/:id/role",
   auth,
   allow("admin"),

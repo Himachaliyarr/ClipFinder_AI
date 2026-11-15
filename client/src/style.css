@@ -14,3 +14,4 @@
 .jobprogress button{justify-self:start;padding:8px 12px}
 .async-progress{display:grid;gap:7px;width:min(420px,100%);margin:10px 0;color:#d4bd87;font-size:13px}.indeterminate-progress{height:10px;overflow:hidden;border-radius:999px;background:#303237}.indeterminate-progress span{display:block;width:38%;height:100%;border-radius:999px;background:#c79b41;animation:progress-slide 1.4s ease-in-out infinite alternate}@keyframes progress-slide{from{transform:translateX(-20%)}to{transform:translateX(185%)}}
 aside{position:sticky;top:0;align-self:flex-start;height:100vh;overflow-y:auto;flex-shrink:0}
+.account-edit-form{display:grid;gap:8px;margin-top:12px}.account-edit-form input,.account-edit-form select{width:100%}.account-actions{display:flex;gap:8px;flex-wrap:wrap}
