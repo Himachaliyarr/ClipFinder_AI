@@ -1,0 +1,9 @@
+node_modules
+.env
+client/dist
+server/uploads
+server/storage
+server/server/storage
+*.log
+.DS_Store
+desktop.ini
