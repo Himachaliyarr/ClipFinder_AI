@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import axios from 'axios';
 import { Document, HeadingLevel, Packer, Paragraph, TextRun } from 'docx';
-import { Film, Upload, RefreshCw, CheckCircle, Clapperboard, Users } from 'lucide-react';
+import { Film, Upload, RefreshCw, CheckCircle, Clapperboard, Users, Sun, Moon, Sparkles } from 'lucide-react';
 import { formatTranscriptForExport, formatTranscriptJson, formatTranscriptTimestamp, getTranscriptLines } from '../utils/transcript.js';
 
 function escapeHtml(value) {
@@ -65,8 +65,31 @@ api.interceptors.request.use(config => {
   return config;
 });
 
+function ThemeToggle({ theme, onToggle }) {
+  const nextTheme = theme === 'dark' ? 'light' : 'dark';
+  const Icon = theme === 'dark' ? Sun : Moon;
+
+  return (
+    <button
+      className="secondary theme-toggle"
+      type="button"
+      onClick={onToggle}
+      aria-label={`Switch to ${nextTheme} mode`}
+      title={`Switch to ${nextTheme} mode`}
+    >
+      <Icon size={16} />
+      <span>{theme === 'dark' ? 'Light mode' : 'Dark mode'}</span>
+    </button>
+  );
+}
+
 export default function App() {
   const [token, setToken] = useState(localStorage.getItem('cf_token'));
+  const [theme, setTheme] = useState(() => {
+    const savedTheme = localStorage.getItem('cf_theme');
+    return savedTheme === 'light' ? 'light' : 'dark';
+  });
+  const [showWelcome, setShowWelcome] = useState(false);
   const [currentUser, setCurrentUser] = useState(null);
   const [page, setPage] = useState('dashboard');
   const [podcasts, setPodcasts] = useState([]);
@@ -90,6 +113,16 @@ export default function App() {
   const [error, setError] = useState('');
   const canDeletePodcasts = ['admin', 'editor'].includes(currentUser?.role);
   const allPodcastsSelected = podcasts.length > 0 && podcasts.every(podcast => selectedPodcastIds.includes(podcast._id));
+
+  useEffect(() => {
+    localStorage.setItem('cf_theme', theme);
+  }, [theme]);
+
+  useEffect(() => {
+    if (!showWelcome) return undefined;
+    const timer = setTimeout(() => setShowWelcome(false), 1500);
+    return () => clearTimeout(timer);
+  }, [showWelcome]);
 
   async function load() {
     try {
@@ -239,6 +272,7 @@ export default function App() {
       localStorage.setItem('cf_token', data.token);
       setToken(data.token);
       setCurrentUser(data.user);
+      setShowWelcome(true);
       setError('');
     } catch (e) {
       setError(e.response?.data?.error || 'Login failed');
@@ -522,7 +556,8 @@ export default function App() {
 
   if (!token) {
     return (
-      <main className="login">
+      <main className="login" data-theme={theme}>
+        <ThemeToggle theme={theme} onToggle={() => setTheme(current => current === 'dark' ? 'light' : 'dark')} />
         <div className="brand"><Film /> ClipFinder <b>AI</b></div>
         <form onSubmit={login}>
           <h1>Team sign in</h1>
@@ -537,7 +572,16 @@ export default function App() {
   }
 
   return (
-    <div className="app">
+    <div className={`app${showWelcome ? ' is-welcoming' : ''}`} data-theme={theme}>
+      {showWelcome && (
+        <div className="welcome-screen" role="status" aria-live="polite">
+          <div className="welcome-orb" aria-hidden="true"><Sparkles size={30} /></div>
+          <p className="welcome-kicker">CLIPFINDER AI <span>•</span> WORKSPACE READY</p>
+          <h2>You're in, <strong>{currentUser?.name || 'creator'}.</strong></h2>
+          <p className="welcome-subtitle">Let’s make something scroll-stopping.</p>
+          <div className="welcome-progress" aria-hidden="true"><span /></div>
+        </div>
+      )}
       <aside>
         <div className="brand"><Film /> ClipFinder <b>AI</b></div>
         <button className={page === 'dashboard' ? 'nav active' : 'nav'} onClick={() => setPage('dashboard')}>
@@ -555,6 +599,7 @@ export default function App() {
             localStorage.removeItem('cf_token');
             setToken(null);
             setCurrentUser(null);
+            setShowWelcome(false);
           }}>Sign out</button>
         </div>
       </aside>
@@ -564,7 +609,10 @@ export default function App() {
             <small>WORKSPACE / {page.toUpperCase()}</small>
             <h1>{page === 'detail' ? selected?.title : page === 'team' ? 'Team and audit log' : 'Podcast workspace'}</h1>
           </div>
-          <button className="secondary" onClick={page === 'team' ? loadTeam : page === 'dashboard' ? refreshDashboard : refresh}><RefreshCw size={16} /> Refresh</button>
+          <div className="header-actions">
+            <ThemeToggle theme={theme} onToggle={() => setTheme(current => current === 'dark' ? 'light' : 'dark')} />
+            <button className="secondary" onClick={page === 'team' ? loadTeam : page === 'dashboard' ? refreshDashboard : refresh}><RefreshCw size={16} /> Refresh</button>
+          </div>
         </header>
         {error && <div className="notice">{error}</div>}
         {page === 'team' && currentUser?.role === 'admin' ? (
@@ -793,15 +841,6 @@ export default function App() {
               <button onClick={transcribe} disabled={busy || !selected?.sourceFiles?.length || ['downloading','queued','processing'].includes(selected?.status)}>
                 {busy ? 'Starting…' : 'Start transcription'}
               </button>
-              {selected?.transcript && (selected?.sourceUrl || selected?.sourceFiles?.some(file => file.kind === 'video')) && (
-                <button
-                  className="secondary"
-                  onClick={generateOpusClips}
-                  disabled={busy || hasOpusClipJob}
-                >
-                  Generate Reels
-                </button>
-              )}
               {hasTranscript && (
                 <button
                   className="secondary"
@@ -809,6 +848,15 @@ export default function App() {
                   disabled={busy || hasStoryMomentJob}
                 >
                   {hasStoryMomentJob ? 'Finding stories…' : selected?.storyMomentsStatus === 'completed' ? 'Regenerate stories' : 'Find story moments'}
+                </button>
+              )}
+              {selected?.transcript && (selected?.sourceUrl || selected?.sourceFiles?.some(file => file.kind === 'video')) && (
+                <button
+                  className="secondary"
+                  onClick={generateOpusClips}
+                  disabled={busy || hasOpusClipJob}
+                >
+                  Generate Reels
                 </button>
               )}
             </section>
