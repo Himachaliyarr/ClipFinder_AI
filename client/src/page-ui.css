@@ -332,6 +332,11 @@
   position: relative;
 }
 
+.main > header {
+  position: relative;
+  z-index: 40;
+}
+
 .notification-center > details > summary {
   position: relative;
   display: grid;

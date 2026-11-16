@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import axios from 'axios';
 import { Document, HeadingLevel, Packer, Paragraph, TextRun } from 'docx';
 import { formatClipMetadataCsv, formatTranscriptForExport, formatTranscriptJson, formatTranscriptSrt, formatTranscriptTimestamp, formatTranscriptVtt, getTranscriptLines } from '../utils/transcript.js';
-import { LoginScreen, WelcomeScreen, WorkspaceHeader, WorkspaceSidebar } from '../components/AppChrome.jsx';
+import { BrandIntroScreen, LoginScreen, WelcomeScreen, WorkspaceHeader, WorkspaceSidebar } from '../components/AppChrome.jsx';
 import { isPodcastJobActive } from '../components/PodcastJobProgress.jsx';
 import { isSupportedExportFormat } from '../components/TranscriptPanel.jsx';
 import DashboardPage from './DashboardPage.jsx';
@@ -47,6 +47,7 @@ export default function App() {
     return savedTheme === 'light' ? 'light' : 'dark';
   });
   const [showWelcome, setShowWelcome] = useState(false);
+  const [showBrandIntro, setShowBrandIntro] = useState(() => !localStorage.getItem('cf_token'));
   const [currentUser, setCurrentUser] = useState(null);
   const [page, setPage] = useState('dashboard');
   const [podcasts, setPodcasts] = useState([]);
@@ -105,6 +106,12 @@ export default function App() {
     const timer = setTimeout(() => setShowWelcome(false), 1500);
     return () => clearTimeout(timer);
   }, [showWelcome]);
+
+  useEffect(() => {
+    if (token || !showBrandIntro) return undefined;
+    const timer = setTimeout(() => setShowBrandIntro(false), 1600);
+    return () => clearTimeout(timer);
+  }, [token, showBrandIntro]);
 
   async function load() {
     try {
@@ -710,6 +717,7 @@ export default function App() {
   }
 
   if (!token) {
+    if (showBrandIntro) return <BrandIntroScreen theme={theme} />;
     return (
       <LoginScreen
         theme={theme}
@@ -737,6 +745,7 @@ export default function App() {
             setToken(null);
             setCurrentUser(null);
             setShowWelcome(false);
+            setShowBrandIntro(true);
             setPage('dashboard');
             setError('');
             setLoginError('');

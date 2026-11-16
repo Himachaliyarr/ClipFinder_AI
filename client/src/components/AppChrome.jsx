@@ -76,6 +76,26 @@ export function WelcomeScreen({ name }) {
   );
 }
 
+export function BrandIntroScreen({ theme }) {
+  return (
+    <main data-theme={theme}>
+      <div className="welcome-screen brand-intro-screen" role="status" aria-live="polite">
+        <div className="welcome-orb" aria-hidden="true">
+          <Film size={30} />
+        </div>
+        <p className="welcome-kicker">YOUR CREATOR WORKSPACE</p>
+        <h2 className="brand-intro-title">
+          ClipFinder <strong>AI</strong>
+        </h2>
+        <p className="welcome-subtitle">Find the moments worth sharing.</p>
+        <div className="welcome-progress" aria-hidden="true">
+          <span />
+        </div>
+      </div>
+    </main>
+  );
+}
+
 export function WorkspaceSidebar({ page, user, onNavigate, onSignOut }) {
   return (
     <aside aria-label="Main navigation">
