@@ -17,7 +17,7 @@ export default function PodcastCard({
 }) {
   return (
     <article className="podcard" onClick={() => onOpen(podcast)}>
-      <div className="podicon"><Film /></div>
+      <div className="podicon" aria-hidden="true"><Film /></div>
       {canDelete && (
         <label onClick={event => event.stopPropagation()}>
           <input
@@ -30,8 +30,19 @@ export default function PodcastCard({
           Select
         </label>
       )}
-      <h3>{podcast.title}</h3>
-      <span className={`status ${podcast.status}`}>{podcast.status.replace('_', ' ')}</span>
+      <h3>
+        <button
+          type="button"
+          className="podcard-title"
+          onClick={event => {
+            event.stopPropagation();
+            onOpen(podcast);
+          }}
+        >
+          {podcast.title}
+        </button>
+      </h3>
+      <span className={`status ${podcast.status}`} aria-label={`Status: ${podcast.status.replace('_', ' ')}`}>{podcast.status.replace('_', ' ')}</span>
       <p className="muted">{new Date(podcast.createdAt).toLocaleString()}</p>
       {(podcast.jobId || isPodcastJobActive(podcast.status) || canRestartPodcastJob(podcast)) && (
         <PodcastJobProgress
