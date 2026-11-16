@@ -589,15 +589,15 @@ export default function App() {
     } catch (e) {
       setError(e.response?.data?.error || 'Could not save clip changes');
     }
+  }
 
-    async function updatePodcastMetadata(podcast, patch) {
-      try {
-        const { data } = await api.patch(`/podcasts/${podcast._id}`, patch);
-        setPodcasts(items => items.map(item => item._id === data._id ? data : item));
-        setSelected(current => current?._id === data._id ? { ...current, ...data } : current);
-      } catch (e) {
-        setError(e.response?.data?.error || 'Could not save project organization');
-      }
+  async function updatePodcastMetadata(podcast, patch) {
+    try {
+      const { data } = await api.patch(`/podcasts/${podcast._id}`, patch);
+      setPodcasts(items => items.map(item => item._id === data._id ? data : item));
+      setSelected(current => current?._id === data._id ? { ...current, ...data } : current);
+    } catch (e) {
+      setError(e.response?.data?.error || 'Could not save project organization');
     }
   }
 
