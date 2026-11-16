@@ -34,6 +34,7 @@ export function LoginScreen({ theme, onToggleTheme, onLogin, error }) {
       <div className="brand">
         <Film /> ClipFinder <b>AI</b>
       </div>
+<<<<<<< HEAD
       <form onSubmit={onLogin} aria-labelledby="team-sign-in-heading">
         <h1 id="team-sign-in-heading">Team sign in</h1>
         <label className="sr-only" htmlFor="sign-in-email">Email</label>
@@ -50,6 +51,19 @@ export function LoginScreen({ theme, onToggleTheme, onLogin, error }) {
         <button type="submit">Sign in</button>
         <p className="muted">Sign in with admin email and password</p>
         {error && <p className="error" role="alert">{error}</p>}
+=======
+      <form onSubmit={onLogin}>
+        <h1>Team sign in</h1>
+        <input name="email" type="email" placeholder="Email" required />
+        <input
+          name="password"
+          type="password"
+          placeholder="Password"
+          required
+        />
+        <button>Sign in</button>
+        {error && <p className="error">{error}</p>}
+>>>>>>> 5e4df040bc2a0c1af8ba173eb9c65e3f485e243a
       </form>
     </main>
   );
@@ -77,14 +91,21 @@ export function WelcomeScreen({ name }) {
 
 export function WorkspaceSidebar({ page, user, onNavigate, onSignOut }) {
   return (
+<<<<<<< HEAD
     <aside aria-label="Main navigation">
+=======
+    <aside>
+>>>>>>> 5e4df040bc2a0c1af8ba173eb9c65e3f485e243a
       <div className="brand">
         <Film /> ClipFinder <b>AI</b>
       </div>
       <button
         className={page === "dashboard" ? "nav active" : "nav"}
+<<<<<<< HEAD
         aria-current={page === "dashboard" ? "page" : undefined}
         aria-label="Podcasts dashboard"
+=======
+>>>>>>> 5e4df040bc2a0c1af8ba173eb9c65e3f485e243a
         onClick={() => onNavigate("dashboard")}
       >
         <Clapperboard /> Podcasts
@@ -92,15 +113,22 @@ export function WorkspaceSidebar({ page, user, onNavigate, onSignOut }) {
       {user?.role === "admin" && (
         <button
           className={page === "team" ? "nav active" : "nav"}
+<<<<<<< HEAD
           aria-current={page === "team" ? "page" : undefined}
           aria-label="Team and audit"
+=======
+>>>>>>> 5e4df040bc2a0c1af8ba173eb9c65e3f485e243a
           onClick={() => onNavigate("team")}
         >
           <Users /> Team &amp; audit
         </button>
       )}
       <div className="sidefoot">
+<<<<<<< HEAD
         <span className="sidebar-user-name">{user?.name || "Vande Digital"}</span>
+=======
+        {user?.name || "Vande Digital"}
+>>>>>>> 5e4df040bc2a0c1af8ba173eb9c65e3f485e243a
         <br />
         <small>Internal production</small>
         <button className="logout" onClick={onSignOut}>
