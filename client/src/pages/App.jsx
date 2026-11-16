@@ -1,8 +1,17 @@
 import React, { useEffect, useState } from 'react';
 import axios from 'axios';
 import { Document, HeadingLevel, Packer, Paragraph, TextRun } from 'docx';
-import { Film, Upload, RefreshCw, CheckCircle, Clapperboard, Users, Sun, Moon, Sparkles } from 'lucide-react';
+import { Upload, CheckCircle, Clapperboard } from 'lucide-react';
 import { formatTranscriptForExport, formatTranscriptJson, formatTranscriptTimestamp, getTranscriptLines } from '../utils/transcript.js';
+import { LoginScreen, WelcomeScreen, WorkspaceHeader, WorkspaceSidebar } from '../components/AppChrome.jsx';
+import PodcastCard from '../components/PodcastCard.jsx';
+import PodcastJobProgress, {
+  canRestartPodcastJob,
+  isPodcastJobActive,
+} from '../components/PodcastJobProgress.jsx';
+import TranscriptPanel, {
+  isSupportedExportFormat,
+} from '../components/TranscriptPanel.jsx';
 
 function escapeHtml(value) {
   return String(value || '').replace(/[&<>"']/g, character => ({
@@ -18,34 +27,6 @@ function transcriptFilename(title) {
   return String(title || 'transcript').replace(/[<>:"/\\|?*\x00-\x1F]/g, '_').trim() || 'transcript';
 }
 
-function getJobStatusMessage(status) {
-  const messages = {
-    downloading: 'Downloading source media…',
-    queued: 'Waiting to start…',
-    processing: 'Processing media…',
-    transcribed: 'Transcription complete.',
-    clips_ready: 'Clip suggestions are ready.',
-    failed: 'Processing failed. Please retry or contact an administrator.',
-    cancelled: 'Processing was stopped.',
-  };
-  return messages[status] || 'Task status updated.';
-}
-
-function isPodcastJobActive(status) {
-  return ['downloading', 'queued', 'processing'].includes(status);
-}
-
-function getPodcastProgress(podcast) {
-  const progress = Number(podcast.jobProgress);
-  if (podcast.status === 'clips_ready' || (podcast.status === 'transcribed' && (!Number.isFinite(progress) || progress === 0))) return 100;
-  return Number.isFinite(progress) ? Math.min(100, Math.max(0, progress)) : 0;
-}
-
-function canRestartPodcastJob(podcast) {
-  return ['failed', 'cancelled'].includes(podcast.status)
-    || (podcast.jobType === 'select-clips' && podcast.status === 'transcribed' && Number(podcast.jobProgress) < 100);
-}
-
 function downloadBlob(blob, filename) {
   const url = URL.createObjectURL(blob);
   const link = document.createElement('a');
@@ -55,33 +36,13 @@ function downloadBlob(blob, filename) {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
-const transcriptExportOptions = ['pdf', 'docx', 'txt', 'json'];
-const isSupportedExportFormat = value => transcriptExportOptions.includes(value);
-
+// Attach the saved session token to every API request in one place.
 const api = axios.create({ baseURL: '/api' });
 api.interceptors.request.use(config => {
   const token = localStorage.getItem('cf_token');
   if (token) config.headers.Authorization = `Bearer ${token}`;
   return config;
 });
-
-function ThemeToggle({ theme, onToggle }) {
-  const nextTheme = theme === 'dark' ? 'light' : 'dark';
-  const Icon = theme === 'dark' ? Sun : Moon;
-
-  return (
-    <button
-      className="secondary theme-toggle"
-      type="button"
-      onClick={onToggle}
-      aria-label={`Switch to ${nextTheme} mode`}
-      title={`Switch to ${nextTheme} mode`}
-    >
-      <Icon size={16} />
-      <span>{theme === 'dark' ? 'Light mode' : 'Dark mode'}</span>
-    </button>
-  );
-}
 
 export default function App() {
   const [token, setToken] = useState(localStorage.getItem('cf_token'));
@@ -238,6 +199,7 @@ export default function App() {
   const hasActivePodcastJobs = podcasts.some(podcast => isPodcastJobActive(podcast.status));
   useEffect(() => {
     if (!token || page !== 'dashboard' || !hasActivePodcastJobs) return;
+    // Poll only while visible dashboard jobs are active, then stop the timer.
     const timer = setInterval(() => load(), 2500);
     return () => clearInterval(timer);
   }, [token, page, hasActivePodcastJobs]);
@@ -406,6 +368,7 @@ export default function App() {
 
       const printWindow = window.open('', '_blank');
       if (!printWindow) throw new Error('Allow pop-ups to export the transcript as PDF.');
+      // Transcript text is inserted into HTML for printing, so escape it before writing.
       const printRows = rows.map(row => `
         <p>${row.start ? `<strong>[${escapeHtml(row.start)}]</strong> ` : ''}${escapeHtml(row.text)}</p>
       `).join('');
@@ -556,64 +519,39 @@ export default function App() {
 
   if (!token) {
     return (
-      <main className="login" data-theme={theme}>
-        <ThemeToggle theme={theme} onToggle={() => setTheme(current => current === 'dark' ? 'light' : 'dark')} />
-        <div className="brand"><Film /> ClipFinder <b>AI</b></div>
-        <form onSubmit={login}>
-          <h1>Team sign in</h1>
-          <input name="email" type="email" placeholder="Email" required />
-          <input name="password" type="password" placeholder="Password" required />
-          <button>Sign in</button>
-          <p className="muted">Sign in with the admin email and password configured in the server .env file.</p>
-          {error && <p className="error">{error}</p>}
-        </form>
-      </main>
+      <LoginScreen
+        theme={theme}
+        onToggleTheme={() => setTheme(current => current === 'dark' ? 'light' : 'dark')}
+        onLogin={login}
+        error={error}
+      />
     );
   }
 
   return (
     <div className={`app${showWelcome ? ' is-welcoming' : ''}`} data-theme={theme}>
       {showWelcome && (
-        <div className="welcome-screen" role="status" aria-live="polite">
-          <div className="welcome-orb" aria-hidden="true"><Sparkles size={30} /></div>
-          <p className="welcome-kicker">CLIPFINDER AI <span>•</span> WORKSPACE READY</p>
-          <h2>You're in, <strong>{currentUser?.name || 'creator'}.</strong></h2>
-          <p className="welcome-subtitle">Let’s make something scroll-stopping.</p>
-          <div className="welcome-progress" aria-hidden="true"><span /></div>
-        </div>
+        <WelcomeScreen name={currentUser?.name} />
       )}
-      <aside>
-        <div className="brand"><Film /> ClipFinder <b>AI</b></div>
-        <button className={page === 'dashboard' ? 'nav active' : 'nav'} onClick={() => setPage('dashboard')}>
-          <Clapperboard /> Podcasts
-        </button>
-        {currentUser?.role === 'admin' && (
-          <button className={page === 'team' ? 'nav active' : 'nav'} onClick={() => setPage('team')}>
-            <Users /> Team & audit
-          </button>
-        )}
-        <div className="sidefoot">
-          {currentUser?.name || 'Vande Digital'}<br />
-          <small>Internal production</small>
-          <button className="logout" onClick={() => {
+      <WorkspaceSidebar
+        page={page}
+        user={currentUser}
+        onNavigate={setPage}
+        onSignOut={() => {
             localStorage.removeItem('cf_token');
             setToken(null);
             setCurrentUser(null);
             setShowWelcome(false);
-          }}>Sign out</button>
-        </div>
-      </aside>
+        }}
+      />
       <main className="main">
-        <header>
-          <div>
-            <small>WORKSPACE / {page.toUpperCase()}</small>
-            <h1>{page === 'detail' ? selected?.title : page === 'team' ? 'Team and audit log' : 'Podcast workspace'}</h1>
-          </div>
-          <div className="header-actions">
-            <ThemeToggle theme={theme} onToggle={() => setTheme(current => current === 'dark' ? 'light' : 'dark')} />
-            <button className="secondary" onClick={page === 'team' ? loadTeam : page === 'dashboard' ? refreshDashboard : refresh}><RefreshCw size={16} /> Refresh</button>
-          </div>
-        </header>
+        <WorkspaceHeader
+          page={page}
+          title={page === 'detail' ? selected?.title : page === 'team' ? 'Team and audit log' : 'Podcast workspace'}
+          theme={theme}
+          onToggleTheme={() => setTheme(current => current === 'dark' ? 'light' : 'dark')}
+          onRefresh={page === 'team' ? loadTeam : page === 'dashboard' ? refreshDashboard : refresh}
+        />
         {error && <div className="notice">{error}</div>}
         {page === 'team' && currentUser?.role === 'admin' ? (
           <>
@@ -765,48 +703,17 @@ export default function App() {
             </section>
             <div className="cards">
               {podcasts.map(podcast => (
-                <article className="podcard" key={podcast._id} onClick={() => open(podcast)}>
-                  <div className="podicon"><Film /></div>
-                  {canDeletePodcasts && (
-                    <label onClick={event => event.stopPropagation()}>
-                      <input
-                        type="checkbox"
-                        aria-label={`Select ${podcast.title}`}
-                        checked={selectedPodcastIds.includes(podcast._id)}
-                        onChange={() => togglePodcastSelection(podcast._id)}
-                        style={{ width: 18, height: 18, padding: 0, accentColor: '#c79b41' }}
-                      />
-                      Select
-                    </label>
-                  )}
-                  <h3>{podcast.title}</h3>
-                  <span className={`status ${podcast.status}`}>{podcast.status.replace('_', ' ')}</span>
-                  <p className="muted">{new Date(podcast.createdAt).toLocaleString()}</p>
-                  {(podcast.jobId || isPodcastJobActive(podcast.status) || canRestartPodcastJob(podcast)) && (
-                    <div className="jobprogress" style={{ minWidth: 0 }}>
-                      <span>{podcast.jobMessage || getJobStatusMessage(podcast.status)} · {getPodcastProgress(podcast)}%</span>
-                      <progress aria-label="Podcast processing progress" max="100" value={getPodcastProgress(podcast)} />
-                      {podcast.jobId && isPodcastJobActive(podcast.status) && (
-                        <button
-                          className="secondary"
-                          onClick={event => { event.stopPropagation(); stopPodcastJob(podcast._id); }}
-                          disabled={busy || podcast.jobMessage?.startsWith('Cancellation requested')}
-                        >
-                          {podcast.jobMessage?.startsWith('Cancellation requested') ? 'Stopping…' : 'Stop'}
-                        </button>
-                      )}
-                      {canRestartPodcastJob(podcast) && (
-                        <button
-                          className="secondary"
-                          onClick={event => { event.stopPropagation(); restartPodcastJob(podcast._id); }}
-                          disabled={busy}
-                        >
-                          Restart
-                        </button>
-                      )}
-                    </div>
-                  )}
-                </article>
+                <PodcastCard
+                  key={podcast._id}
+                  podcast={podcast}
+                  canDelete={canDeletePodcasts}
+                  selected={selectedPodcastIds.includes(podcast._id)}
+                  busy={busy}
+                  onOpen={open}
+                  onToggleSelection={togglePodcastSelection}
+                  onStop={stopPodcastJob}
+                  onRestart={restartPodcastJob}
+                />
               ))}
             </div>
           </>
@@ -818,24 +725,12 @@ export default function App() {
                 <p className="muted">{selected?.sourceFiles?.length || 0} source files · {selected?.language || 'Language pending'}</p>
                 {selected?.sourceUrl && <a href={selected.sourceUrl} target="_blank" rel="noreferrer">YouTube source</a>}
                 {(selected?.jobId || isPodcastJobActive(selected?.status) || (selected && canRestartPodcastJob(selected))) && (
-                  <div className="jobprogress">
-                    <span>{selected.jobMessage || getJobStatusMessage(selected.status)} · {getPodcastProgress(selected)}%</span>
-                    <progress aria-label="Podcast processing progress" max="100" value={getPodcastProgress(selected)} />
-                    {selected.jobId && isPodcastJobActive(selected.status) && (
-                      <button
-                        className="secondary"
-                        onClick={() => stopPodcastJob(selected._id)}
-                        disabled={busy || selected.jobMessage?.startsWith('Cancellation requested')}
-                      >
-                        {selected.jobMessage?.startsWith('Cancellation requested') ? 'Stopping…' : 'Stop'}
-                      </button>
-                    )}
-                    {canRestartPodcastJob(selected) && (
-                      <button className="secondary" onClick={() => restartPodcastJob(selected._id)} disabled={busy}>
-                        Restart
-                      </button>
-                    )}
-                  </div>
+                  <PodcastJobProgress
+                    podcast={selected}
+                    busy={busy}
+                    onStop={() => stopPodcastJob(selected._id)}
+                    onRestart={() => restartPodcastJob(selected._id)}
+                  />
                 )}
               </div>
               <button onClick={transcribe} disabled={busy || !selected?.sourceFiles?.length || ['downloading','queued','processing'].includes(selected?.status)}>
@@ -877,68 +772,16 @@ export default function App() {
               </button>
             </section>
             {selected?.error && !isPodcastJobActive(selected.status) && <div className="notice error">Processing failed: {selected.error}</div>}
-            <section className="transcript">
-              <div className="transcript-heading">
-                <h3>Transcript</h3>
-                <div className="transcript-actions">
-                  <select
-                    className="transcript-export-format"
-                    aria-label="Transcript export format"
-                    value={selectedExportFormat}
-                    onChange={event => {
-                      const nextFormat = event.target.value;
-                      setExportFormat(isSupportedExportFormat(nextFormat) ? nextFormat : 'pdf');
-                    }}
-                  >
-                    {transcriptExportOptions.map(option => (
-                      <option key={option} value={option}>{option === 'pdf' ? 'PDF' : option === 'docx' ? 'Word (.docx)' : option === 'json' ? 'JSON (.json)' : 'Text (.txt)'}</option>
-                    ))}
-                  </select>
-                  <button className="secondary" onClick={exportTranscript} disabled={!hasTranscript}>
-                    Export transcript
-                  </button>
-                  {selectedExportFormat === 'pdf' && <small className="muted">Choose “Save as PDF” in the print dialog.</small>}
-                  <button
-                    className="secondary"
-                    disabled={!hasTranscript}
-                    aria-expanded={transcriptVisible}
-                    aria-controls="generated-transcript-content"
-                    onClick={() => setOpenTranscriptFor(transcriptVisible ? null : selected?._id)}
-                  >
-                    {transcriptVisible ? 'Hide transcript' : 'Show transcript'}
-                  </button>
-                </div>
-              </div>
-              {transcriptVisible ? (
-                <div id="generated-transcript-content" className="transcript-content">
-                  {transcriptLines.length ? (
-                    <div className="transcript-lines">
-                      {transcriptLines.map((line, index) => (
-                        <div className="transcript-line" key={`${line.start}-${index}`}>
-                          <span className="transcript-timestamp">
-                            {formatTranscriptTimestamp(line.start)} – {formatTranscriptTimestamp(line.end)}
-                          </span>
-                          <span className="transcript-text">
-                            {line.text}
-                          </span>
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <p>{selected?.transcript}</p>
-                  )}
-                  {selected?.timingNote && <small className="muted">Transcript timing information is available.</small>}
-                  {selected?.sarvamTranscript && selected.sarvamTranscript !== selected.transcript && (
-                    <details className="sarvam-transcript">
-                      <summary>Sarvam AI transcript</summary>
-                      <p>{selected.sarvamTranscript}</p>
-                    </details>
-                  )}
-                </div>
-              ) : !hasTranscript ? (
-                <p className="muted">Transcript will appear here after transcription.</p>
-              ) : null}
-            </section>
+            <TranscriptPanel
+              selected={selected}
+              transcriptLines={transcriptLines}
+              transcriptVisible={transcriptVisible}
+              hasTranscript={hasTranscript}
+              selectedExportFormat={selectedExportFormat}
+              setExportFormat={setExportFormat}
+              exportTranscript={exportTranscript}
+              setOpenTranscriptFor={setOpenTranscriptFor}
+            />
             <section className="story-results">
               <div className="story-heading">
                 <div>
@@ -1025,7 +868,7 @@ export default function App() {
                 </p>
                 {hasOpusClipJob && (
                   <div className="async-progress">
-                    <span>{selected.opusClipMessage || 'Generating reels…'}</span>
+                    <span>{selected.opusClipStatus === 'queued' ? 'Starting reel generation…' : 'Generating your reels…'}</span>
                     <div className="indeterminate-progress" role="progressbar" aria-label="Generating reels" aria-valuetext="In progress">
                       <span />
                     </div>

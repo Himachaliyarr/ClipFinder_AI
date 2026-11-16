@@ -1,4 +1,5 @@
 export function formatTimedTranscript(segments){
+  // Keep the source timestamps in compact windows so the model can choose grounded clip ranges.
   const windows=new Map();
   for(const segment of segments){
     const start=Number(segment.start),end=Number(segment.end),text=String(segment.text||'').trim();
@@ -25,6 +26,7 @@ function parseClipResponse(raw,duration){
     catch (parseError) { throw new Error('Clip selection returned invalid JSON',{cause:parseError}); }
   }
   if(!Array.isArray(parsed?.clips)) throw new Error('Clip selection response did not contain a clips array');
+  // Model output is untrusted: discard malformed ranges before creating persisted clips.
   const clips=parsed.clips.flatMap(clip=>{
     if(!clip||typeof clip!=='object'||clip.start===undefined||clip.end===undefined) return [];
     const start=Number(clip.start),end=Number(clip.end);

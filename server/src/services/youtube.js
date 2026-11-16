@@ -9,6 +9,7 @@ export function normalizeYouTubeUrl(value) {
   if (typeof value !== 'string' || value.length > 2048) return null;
 
   let url;
+  // Accept known video URL forms only, then pass a canonical URL into the worker queue.
   try { url = new URL(value.trim()); } catch { return null; }
   if (url.protocol !== 'https:' || url.username || url.password || url.port || !YOUTUBE_HOSTS.has(url.hostname.toLowerCase())) return null;
 

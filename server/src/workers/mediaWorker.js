@@ -21,6 +21,7 @@ class JobCancelledError extends Error {
   }
 }
 function assertJobRunning(signal) {
+  // Check cancellation between non-abortable steps as well as passing the signal to child processes.
   if (signal?.aborted) throw signal.reason || new JobCancelledError();
 }
 const run = (bin,args,signal) => new Promise((resolve,reject)=>{
@@ -34,6 +35,7 @@ async function detectSpeakerTimeline(podcast, workDir, signal) {
   const micTracks = (podcast.sourceFiles || []).filter(f => f.kind === 'audio' && f.speaker);
   const cameraKeys = new Set((podcast.sourceFiles || []).filter(f => f.kind === 'video' && f.speaker).map(f => f.speaker));
   const usable = micTracks.filter(f => cameraKeys.has(f.speaker));
+  // Speaker switching needs both a labeled mic and a matching camera for at least two people.
   if (usable.length < 2) return [];
   const wavDir = path.join(workDir, 'speaker-analysis');
   await fs.mkdir(wavDir, { recursive: true });
@@ -69,6 +71,7 @@ async function generateClipSuggestions({ podcast, job, transcript, duration, seg
     assertJobRunning(signal);
   } catch (error) {
     assertJobRunning(signal);
+    // Keep the completed transcript usable even when the optional AI clip-selection call fails.
     selectionError=error;
     selected={clips:[],warning:`AI reel suggestions failed: ${error.message}`};
     console.error('AI reel suggestion request failed; transcript remains available:', error.message);
@@ -291,7 +294,7 @@ async function processMediaJob(job, signal) {
     if (!podcast) throw new Error('Podcast not found');
     if (!podcast.transcript || !podcast.duration) throw new Error('Transcribe the podcast before combined reel generation');
     await Podcast.findByIdAndUpdate(podcast._id, {
-      $set: { opusClipStatus: 'processing', opusClipMessage: 'OpenAI is selecting the strongest moments' },
+      $set: { opusClipStatus: 'processing', opusClipMessage: 'Preparing reel moments for OpusClip' },
       $unset: { opusClipError: 1 }
     });
 
@@ -315,7 +318,7 @@ async function processMediaJob(job, signal) {
         .lean();
       const selection = await selectClips(podcast.transcript, podcast.duration, examples, podcast.segments || []);
       if (!selection.clips?.length) {
-        throw new Error(selection.warning || 'OpenAI did not select any timed moments for OpusClip');
+        throw new Error(selection.warning || 'No reel moments were selected for OpusClip');
       }
       moments = selection.clips.slice(0, 8);
       await Clip.insertMany(moments.map(moment => ({ ...moment, podcast: podcast._id })));
@@ -331,7 +334,7 @@ async function processMediaJob(job, signal) {
     await Podcast.findByIdAndUpdate(podcast._id, {
       $set: {
         opusClipOpenAiMoments: openAiMoments,
-        opusClipMessage: `OpenAI selected ${openAiMoments.length} moments; sending them to OpusClip`
+        opusClipMessage: 'Sending selected moments to OpusClip'
       }
     });
 
@@ -341,7 +344,7 @@ async function processMediaJob(job, signal) {
         opusClipProjectId: project.projectId,
         opusClipOrgId: project.orgId,
         opusClipStatus: 'processing',
-        opusClipMessage: 'OpusClip is turning OpenAI-selected moments into reels'
+        opusClipMessage: 'OpusClip is generating your reels'
       }
     });
     await enqueueOpusClipPoll(podcast.id, job.data.userId);

@@ -18,10 +18,12 @@ test('selects 25-30 timestamped stories through ChatGPT and normalizes response 
   const previousKey = process.env.LLM_API_KEY;
   const previousModel = process.env.LLM_MODEL;
   const previousBaseUrl = process.env.LLM_BASE_URL;
+  const previousProvider = process.env.LLM_PROVIDER;
   const previousFetch = globalThis.fetch;
   process.env.LLM_API_KEY = 'test-key';
   delete process.env.LLM_MODEL;
   process.env.LLM_BASE_URL = 'https://api.openai.com/v1/';
+  delete process.env.LLM_PROVIDER;
   let requestUrl;
   let requestBody;
   let requestHeaders;
@@ -59,6 +61,8 @@ test('selects 25-30 timestamped stories through ChatGPT and normalizes response 
     else process.env.LLM_MODEL = previousModel;
     if (previousBaseUrl === undefined) delete process.env.LLM_BASE_URL;
     else process.env.LLM_BASE_URL = previousBaseUrl;
+    if (previousProvider === undefined) delete process.env.LLM_PROVIDER;
+    else process.env.LLM_PROVIDER = previousProvider;
   }
 });
 

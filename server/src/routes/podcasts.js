@@ -15,6 +15,7 @@ const root = path.resolve(process.env.MEDIA_ROOT || './server/storage');
 fs.mkdirSync(root, { recursive: true });
 const wrap = fn => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
 const validId = id => mongoose.isValidObjectId(id);
+// Keep storage paths private; API responses expose metadata but not filesystem locations.
 const publicPodcast = doc => { const obj = doc.toObject ? doc.toObject() : doc; if (obj.sourceFiles) obj.sourceFiles = obj.sourceFiles.map(({ path: _path, ...f }) => f); delete obj.audioPath; return obj; };
 const publicClip = doc => { const obj = doc.toObject ? doc.toObject() : doc; delete obj.renderPath; return obj; };
 const storage = multer.diskStorage({
@@ -43,6 +44,7 @@ r.post('/youtube', auth, allow('admin','editor'), wrap(async (req, res) => {
 
   const podcast = await Podcast.create({ title, sourceUrl: url, status: 'queued', createdBy: req.user.id });
   try {
+    // Persist the queue id and progress alongside the podcast for dashboard polling.
     const job = await enqueueYoutubeTranscription(podcast.id, req.user.id, url);
     podcast.jobId = job.id;
     podcast.jobType = job.name;

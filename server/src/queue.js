@@ -19,6 +19,7 @@ export async function requestMediaJobCancellation(job) {
     }
   }
   if (state === 'active') {
+    // Active jobs stop cooperatively by checking this short-lived Redis flag.
     await connection.set(mediaJobCancellationKey(job.id), '1', 'EX', 3600);
     return 'cancelling';
   }

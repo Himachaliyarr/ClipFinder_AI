@@ -22,6 +22,7 @@ async function configureAdminFromEnvironment() {
 
   const user = await User.findOne({ email });
   if (user) {
+    // The environment is authoritative for the bootstrap admin on every server start.
     let changed = false;
     if (user.name !== name) { user.name = name; changed = true; }
     if (user.role !== 'admin') { user.role = 'admin'; changed = true; }

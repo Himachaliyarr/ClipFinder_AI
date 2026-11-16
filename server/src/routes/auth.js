@@ -15,6 +15,7 @@ const authLimiter = rateLimit({
 });
 const wrap = (fn) => (req, res, next) =>
   Promise.resolve(fn(req, res, next)).catch(next);
+// Keep role and profile data out of tokens; the auth middleware loads the current user.
 const issueToken = (user) =>
   jwt.sign({ id: user.id }, process.env.JWT_SECRET, { expiresIn: "7d" });
 r.post(

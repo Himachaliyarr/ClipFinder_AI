@@ -15,6 +15,7 @@ const DEEPGRAM_CHUNK_OVERLAP_SECONDS=3;
 const PROVIDER_TIMEOUT_MS=90000;
 
 export async function splitAudio(inputPath,outDir,signal,chunkSeconds=getChunkSeconds()){
+  // Chunk long recordings so provider limits and retries do not require re-uploading the full file.
   await fs.promises.mkdir(outDir,{recursive:true});
   const {stdout}=await execFileAsync(ffprobePath,['-v','error','-show_entries','format=duration','-of','default=noprint_wrappers=1:nokey=1',inputPath],{signal});
   const duration=Number(stdout.trim()); if(!duration) throw new Error('Could not read audio duration; ensure ffmpeg/ffprobe is installed');
@@ -86,6 +87,7 @@ export function parseDeepgramResponse(data,offset=0,duration=Infinity){
   return {transcript:alternative?.transcript||'',language:alternative?.languages?.join(',')||null,segments};
 }
 export function reconcileChunkSpeakerIds(previousSegments,currentSegments,overlapStart,overlapEnd,nextSpeakerId=0){
+  // Match speaker labels only within overlapping audio, where the same voices can be compared.
   const pairScores=new Map();
   for(const current of currentSegments){
     if(current.speaker===null||current.speaker===undefined||current.start>=overlapEnd||current.end<=overlapStart) continue;
