@@ -22,6 +22,9 @@ export default function PodcastDetailPage({ data, actions }) {
     selectedExportFormat,
     hasStoryMomentJob,
     hasOpusClipJob,
+    assignees,
+    savingTranscript,
+    previewSource,
   } = data;
   const {
     setSourceKind,
@@ -41,8 +44,13 @@ export default function PodcastDetailPage({ data, actions }) {
     renderClip,
     previewClip,
     downloadClip,
+    saveTranscript,
+    exportClipMetadata,
+    previewSourceClip,
+    closeSourcePreview,
   } = actions;
   const [activeTab, setActiveTab] = useState('transcript');
+  const [aspectRatio, setAspectRatio] = useState('9:16');
   const tabs = [
     { id: 'transcript', label: 'Transcript' },
     { id: 'stories', label: `Story moments (${selected?.storyMoments?.length || 0})` },
@@ -147,6 +155,8 @@ export default function PodcastDetailPage({ data, actions }) {
             setExportFormat={setExportFormat}
             exportTranscript={exportTranscript}
             setOpenTranscriptFor={setOpenTranscriptFor}
+            saveTranscript={saveTranscript}
+            savingTranscript={savingTranscript}
           />
       </div>
       <div id="detail-panel-stories" className="detail-tab-panel" role="tabpanel" aria-labelledby="detail-tab-stories" tabIndex={0} hidden={activeTab !== 'stories'}>
@@ -200,7 +210,20 @@ export default function PodcastDetailPage({ data, actions }) {
           </section>
       </div>
       <div id="detail-panel-clips" className="detail-tab-panel" role="tabpanel" aria-labelledby="detail-tab-clips" tabIndex={0} hidden={activeTab !== 'clips'}>
-          <h3 className="sectiontitle">Reel suggestions ({clips.length})</h3>
+          <div className="clip-library-heading">
+            <h3 className="sectiontitle">Reel suggestions ({clips.length})</h3>
+            <div className="clip-library-actions">
+              <label>
+                <span>Social format</span>
+                <select value={aspectRatio} onChange={event => setAspectRatio(event.target.value)} aria-label="Social video format">
+                  <option value="9:16">TikTok / Reels / Shorts (9:16)</option>
+                  <option value="1:1">Square feed (1:1)</option>
+                  <option value="16:9">Landscape (16:9)</option>
+                </select>
+              </label>
+              <button type="button" className="secondary" onClick={exportClipMetadata} disabled={!clips.length}>Export CSV</button>
+            </div>
+          </div>
           {!clips.length && <p className="muted">{selected?.transcript ? 'No reel suggestions are available yet.' : 'Transcribe the source to prepare reel suggestions.'}</p>}
           <div className="cliplist">
             {clips.map(clip => (
@@ -214,6 +237,9 @@ export default function PodcastDetailPage({ data, actions }) {
                     <label>In (sec)<input type="number" min="0" step="0.1" defaultValue={clip.start} onBlur={event => updateClip(clip._id, { start: Number(event.target.value) })} /></label>
                     <label>Out (sec)<input type="number" min="0.1" step="0.1" defaultValue={clip.end} onBlur={event => updateClip(clip._id, { end: Number(event.target.value) })} /></label>
                   </div>
+                  {selected?.sourceFiles?.some(file => file.kind === 'video') && (
+                    <button className="secondary" type="button" onClick={() => previewSourceClip(clip)}>Preview source segment</button>
+                  )}
                   <label>Caption</label>
                   <textarea aria-label={`Caption for ${clip.title}`} defaultValue={clip.caption} onBlur={event => updateClip(clip._id, { caption: event.target.value })} />
                   <div className="trimrow performance">
@@ -221,10 +247,11 @@ export default function PodcastDetailPage({ data, actions }) {
                     <label>Average watch time (sec)<input type="number" min="0" step="0.1" defaultValue={clip.performance?.watchTime ?? ''} onBlur={event => updateClip(clip._id, { performance: { watchTime: Number(event.target.value || 0) } })} /></label>
                   </div>
                   <div className="actions">
-                    <button className="approve" onClick={() => updateClip(clip._id, { status: 'approved' })}><CheckCircle size={15} /> Approve</button>
-                    <button className="reject" onClick={() => updateClip(clip._id, { status: 'rejected' })}>Reject</button>
+                    {clip.status === 'suggested' && <button className="approve" onClick={() => updateClip(clip._id, { status: 'approved' })}><CheckCircle size={15} /> Approve</button>}
+                    {['approved', 'rendered'].includes(clip.status) && <button className="approve" onClick={() => updateClip(clip._id, { status: 'published' })}>Mark published</button>}
+                    {clip.status !== 'published' && <button className="reject" onClick={() => updateClip(clip._id, { status: 'rejected' })}>Reject</button>}
                     <button className="secondary" onClick={() => editCameraPlan(clip)}>Camera plan</button>
-                    <button onClick={() => renderClip(clip._id)} disabled={busy || ['queued', 'processing'].includes(clip.renderStatus)}>Render 9:16</button>
+                    <button onClick={() => renderClip(clip._id, aspectRatio)} disabled={busy || ['queued', 'processing'].includes(clip.renderStatus)}>Render {aspectRatio}</button>
                     {['queued', 'processing'].includes(clip.renderStatus) && <span className="renderprogress">{clip.renderStatus} · {clip.renderProgress || 0}%</span>}
                     {clip.renderStatus === 'failed' && <span className="error">{clip.renderError || 'Render failed'}</span>}
                     {clip.renderStatus === 'completed' && (
@@ -234,8 +261,17 @@ export default function PodcastDetailPage({ data, actions }) {
                       </>
                     )}
                   </div>
+                  {assignees?.length > 0 && (
+                    <label className="clip-assignee">
+                      Assigned editor
+                      <select value={clip.assignedTo?._id || clip.assignedTo || ''} onChange={event => updateClip(clip._id, { assignedTo: event.target.value || null })}>
+                        <option value="">Unassigned</option>
+                        {assignees.map(user => <option value={user._id || user.id} key={user._id || user.id}>{user.name}</option>)}
+                      </select>
+                    </label>
+                  )}
                 </div>
-                <span className={`status ${clip.status}`}>{clip.status}</span>
+                <span className={`status ${clip.status}`}>{clip.status === 'suggested' ? 'Needs review' : clip.status}</span>
               </article>
             ))}
           </div>
@@ -281,6 +317,27 @@ export default function PodcastDetailPage({ data, actions }) {
             </div>
           )}
         </div>
+      {previewSource && (
+        <div className="clip-preview-backdrop" role="presentation" onClick={closeSourcePreview}>
+          <section className="clip-preview-modal" role="dialog" aria-modal="true" aria-labelledby="clip-preview-title" onClick={event => event.stopPropagation()}>
+            <div className="clip-preview-header">
+              <h3 id="clip-preview-title">{previewSource.title}</h3>
+              <button type="button" className="secondary" onClick={closeSourcePreview}>Close preview</button>
+            </div>
+            <video
+              key={previewSource.url}
+              src={previewSource.url}
+              controls
+              autoPlay
+              onLoadedMetadata={event => { event.currentTarget.currentTime = previewSource.start; }}
+              onTimeUpdate={event => {
+                if (event.currentTarget.currentTime >= previewSource.end) event.currentTarget.pause();
+              }}
+            />
+            <p className="muted">Previewing {previewSource.start.toFixed(1)}–{previewSource.end.toFixed(1)} seconds from the source.</p>
+          </section>
+        </div>
+      )}
     </>
   );
 }

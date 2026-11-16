@@ -1,5 +1,6 @@
 import {
   Clapperboard,
+  Bell,
   Film,
   Moon,
   RefreshCw,
@@ -117,6 +118,8 @@ export function WorkspaceHeader({
   theme,
   onToggleTheme,
   onRefresh,
+  notifications = [],
+  onClearNotifications,
 }) {
   return (
     <header>
@@ -126,6 +129,31 @@ export function WorkspaceHeader({
       </div>
       <div className="header-actions">
         <ThemeToggle theme={theme} onToggle={onToggleTheme} />
+        <div className="notification-center">
+          <details>
+            <summary aria-label={`${notifications.length} notifications`}>
+              <Bell size={16} />
+              {notifications.length > 0 && <span className="notification-count">{notifications.length}</span>}
+            </summary>
+            <section className="notification-popover" aria-label="Recent notifications">
+              <div className="notification-heading">
+                <strong>Notifications</strong>
+                {notifications.length > 0 && (
+                  <button type="button" className="notification-clear" onClick={onClearNotifications}>
+                    Clear all
+                  </button>
+                )}
+              </div>
+              {notifications.length ? notifications.map(notification => (
+                <article className="notification-item" key={notification.id}>
+                  <strong>{notification.title}</strong>
+                  <p>{notification.message}</p>
+                  <time dateTime={notification.createdAt}>{new Date(notification.createdAt).toLocaleString()}</time>
+                </article>
+              )) : <p className="muted notification-empty">No notifications yet.</p>}
+            </section>
+          </details>
+        </div>
         <button className="secondary" onClick={onRefresh}>
           <RefreshCw size={16} /> Refresh
         </button>

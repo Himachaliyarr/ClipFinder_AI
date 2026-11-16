@@ -1,7 +1,7 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import axios from 'axios';
 import { Document, HeadingLevel, Packer, Paragraph, TextRun } from 'docx';
-import { formatTranscriptForExport, formatTranscriptJson, formatTranscriptTimestamp, getTranscriptLines } from '../utils/transcript.js';
+import { formatClipMetadataCsv, formatTranscriptForExport, formatTranscriptJson, formatTranscriptSrt, formatTranscriptTimestamp, formatTranscriptVtt, getTranscriptLines } from '../utils/transcript.js';
 import { LoginScreen, WelcomeScreen, WorkspaceHeader, WorkspaceSidebar } from '../components/AppChrome.jsx';
 import { isPodcastJobActive } from '../components/PodcastJobProgress.jsx';
 import { isSupportedExportFormat } from '../components/TranscriptPanel.jsx';
@@ -55,6 +55,9 @@ export default function App() {
   const [selectedPodcastIds, setSelectedPodcastIds] = useState([]);
   const [podcastSearch, setPodcastSearch] = useState('');
   const [podcastStatusFilter, setPodcastStatusFilter] = useState('all');
+  const [projectFolder, setProjectFolder] = useState('');
+  const [projectTags, setProjectTags] = useState('');
+  const [folderFilter, setFolderFilter] = useState('all');
   const [selected, setSelected] = useState(null);
   const [openTranscriptFor, setOpenTranscriptFor] = useState(null);
   const [clips, setClips] = useState([]);
@@ -65,21 +68,32 @@ export default function App() {
   const [editingUser, setEditingUser] = useState(null);
   const [title, setTitle] = useState('');
   const [files, setFiles] = useState([]);
+  const [uploadLimits, setUploadLimits] = useState(null);
   const [youtubeUrl, setYoutubeUrl] = useState('');
   const [extraFiles, setExtraFiles] = useState([]);
   const [sourceKind, setSourceKind] = useState('video');
   const [speakerKey, setSpeakerKey] = useState('');
   const [exportFormat, setExportFormat] = useState('pdf');
   const [busy, setBusy] = useState(false);
+  const [savingTranscript, setSavingTranscript] = useState(false);
+  const [assignees, setAssignees] = useState([]);
+  const [previewSource, setPreviewSource] = useState(null);
+  const [notifications, setNotifications] = useState([]);
+  const notificationCursor = useRef(new Date(Date.now() - 60_000).toISOString());
+  const seenNotificationIds = useRef(new Set());
   const [metricsLoading, setMetricsLoading] = useState(Boolean(localStorage.getItem('cf_token')));
   const [error, setError] = useState('');
   const [loginError, setLoginError] = useState('');
   const canDeletePodcasts = ['admin', 'editor'].includes(currentUser?.role);
   const filteredPodcasts = podcasts.filter(podcast => {
-    const matchesSearch = String(podcast.title || '').toLowerCase().includes(podcastSearch.trim().toLowerCase());
+    const search = podcastSearch.trim().toLowerCase();
+    const matchesSearch = !search || [podcast.title, ...(podcast.tags || [])]
+      .some(value => String(value || '').toLowerCase().includes(search));
     const matchesStatus = podcastStatusFilter === 'all' || podcast.status === podcastStatusFilter;
-    return matchesSearch && matchesStatus;
+    const matchesFolder = folderFilter === 'all' || (podcast.folder || '') === folderFilter;
+    return matchesSearch && matchesStatus && matchesFolder;
   });
+  const folderOptions = [...new Set(podcasts.map(podcast => podcast.folder).filter(Boolean))].sort((a, b) => a.localeCompare(b));
   const allPodcastsSelected = filteredPodcasts.length > 0 && filteredPodcasts.every(podcast => selectedPodcastIds.includes(podcast._id));
 
   useEffect(() => {
@@ -94,7 +108,8 @@ export default function App() {
 
   async function load() {
     try {
-      setPodcasts((await api.get('/podcasts')).data);
+      const nextPodcasts = (await api.get('/podcasts')).data;
+      setPodcasts(nextPodcasts);
       setPodcastsLoadError('');
     } catch (e) {
       setPodcastsLoadError(e.response?.data?.error || 'The podcast list is temporarily unavailable.');
@@ -109,6 +124,59 @@ export default function App() {
     api.get('/auth/me').then(({ data }) => setCurrentUser(data)).catch(e => {
       setError(e.response?.data?.error || 'Could not load the signed-in user');
     });
+  }, [token]);
+
+  useEffect(() => {
+    if (!token) return undefined;
+    let active = true;
+    api.get('/podcasts/upload-limits')
+      .then(({ data }) => { if (active) setUploadLimits(data); })
+      .catch(e => { if (active) setError(e.response?.data?.error || 'Could not load upload limits'); });
+    return () => { active = false; };
+  }, [token]);
+
+  useEffect(() => {
+    if (!token || !currentUser) return undefined;
+    if (currentUser.role === 'viewer') {
+      setAssignees([]);
+      return undefined;
+    }
+    let active = true;
+    api.get('/auth/assignable-users')
+      .then(({ data }) => { if (active) setAssignees(data); })
+      .catch(e => { if (active) setError(e.response?.data?.error || 'Could not load assignable editors'); });
+    return () => { active = false; };
+  }, [token, currentUser?.role]);
+
+  useEffect(() => {
+    if (!token) return undefined;
+    let active = true;
+    const pollNotifications = async () => {
+      try {
+        const since = new Date(Date.parse(notificationCursor.current) - 60_000).toISOString();
+        const { data } = await api.get('/podcasts/notifications', { params: { since } });
+        if (!active) return;
+        const fresh = data.filter(notification => !seenNotificationIds.current.has(notification.id));
+        if (fresh.length) {
+          fresh.forEach(notification => seenNotificationIds.current.add(notification.id));
+          if (seenNotificationIds.current.size > 500) {
+            seenNotificationIds.current = new Set([...seenNotificationIds.current].slice(-250));
+          }
+          notificationCursor.current = data.reduce((latest, notification) => (
+            notification.createdAt > latest ? notification.createdAt : latest
+          ), notificationCursor.current);
+          setNotifications(current => [...fresh, ...current].slice(0, 30));
+        }
+      } catch (e) {
+        if (active) setError(e.response?.data?.error || 'Could not load background job notifications');
+      }
+    };
+    pollNotifications();
+    const timer = setInterval(pollNotifications, 10_000);
+    return () => {
+      active = false;
+      clearInterval(timer);
+    };
   }, [token]);
 
   async function loadMetrics() {
@@ -256,16 +324,28 @@ export default function App() {
       setToken(data.token);
       setCurrentUser(data.user);
       setShowWelcome(true);
+      setNotifications([]);
+      notificationCursor.current = new Date(Date.now() - 60_000).toISOString();
+      seenNotificationIds.current = new Set();
       setPodcastsLoaded(false);
       setPodcasts([]);
       setError('');
       setLoginError('');
+      setNotifications([]);
+      notificationCursor.current = new Date().toISOString();
+      seenNotificationIds.current = new Set();
+      closeSourcePreview();
     } catch (e) {
       setLoginError(e.response?.data?.error || 'Login failed');
     }
   }
 
   async function create() {
+    const uploadError = youtubeUrl.trim() ? '' : validateUpload(files);
+    if (uploadError) {
+      setError(uploadError);
+      return;
+    }
     setBusy(true);
     try {
       let podcast;
@@ -273,11 +353,17 @@ export default function App() {
         const result = (await api.post('/podcasts/youtube', {
           title,
           url: youtubeUrl.trim(),
+          folder: projectFolder,
+          tags: projectTags.split(',').map(tag => tag.trim()).filter(Boolean),
         })).data;
         podcast = result.podcast;
         setError('YouTube transcription queued. Media will not be saved locally.');
       } else {
-        podcast = (await api.post('/podcasts', { title })).data;
+        podcast = (await api.post('/podcasts', {
+          title,
+          folder: projectFolder,
+          tags: projectTags.split(',').map(tag => tag.trim()).filter(Boolean),
+        })).data;
         const formData = new FormData();
         [...files].forEach(file => formData.append('files', file));
         formData.append('kind', sourceKind);
@@ -286,6 +372,8 @@ export default function App() {
       }
 
       setTitle('');
+      setProjectFolder('');
+      setProjectTags('');
       setFiles([]);
       setYoutubeUrl('');
       await load();
@@ -299,6 +387,7 @@ export default function App() {
   }
 
   async function open(podcast) {
+    closeSourcePreview();
     setPage('detail');
     setSelected(podcast);
     setError('');
@@ -316,6 +405,11 @@ export default function App() {
 
   async function uploadMore() {
     if (!extraFiles.length) return;
+    const uploadError = validateUpload(extraFiles);
+    if (uploadError) {
+      setError(uploadError);
+      return;
+    }
     setBusy(true);
     try {
       const formData = new FormData();
@@ -331,6 +425,17 @@ export default function App() {
     } finally {
       setBusy(false);
     }
+  }
+
+  function validateUpload(selectedFiles) {
+    if (!uploadLimits) return '';
+    if (selectedFiles.length > uploadLimits.maxFiles) {
+      return `Select no more than ${uploadLimits.maxFiles} files at a time.`;
+    }
+    const oversizedFile = [...selectedFiles].find(file => file.size > uploadLimits.maxFileBytes);
+    return oversizedFile
+      ? `${oversizedFile.name} exceeds the ${Math.ceil(uploadLimits.maxFileBytes / 1024 ** 3)} GiB per-file limit.`
+      : '';
   }
 
   async function transcribe() {
@@ -374,6 +479,17 @@ export default function App() {
         return;
       }
 
+      if (normalizedFormat === 'srt' || normalizedFormat === 'vtt') {
+        const content = normalizedFormat === 'srt'
+          ? formatTranscriptSrt(selected.segments)
+          : formatTranscriptVtt(selected.segments);
+        downloadBlob(
+          new Blob([content], { type: 'text/plain;charset=utf-8' }),
+          `${filename}-transcript.${normalizedFormat}`
+        );
+        return;
+      }
+
       if (normalizedFormat === 'docx') {
         const paragraphs = [
           new Paragraph({ text: selected.title || 'Transcript', heading: HeadingLevel.TITLE }),
@@ -407,6 +523,29 @@ export default function App() {
     }
   }
 
+  async function saveTranscript(payload) {
+    setSavingTranscript(true);
+    try {
+      const { data } = await api.patch(`/podcasts/${selected._id}/transcript`, payload);
+      setSelected(data);
+      setPodcasts(items => items.map(item => item._id === data._id ? { ...item, status: data.status, jobMessage: data.jobMessage } : item));
+      setError('Transcript saved. Regenerate clip suggestions to apply the edits.');
+      return true;
+    } catch (e) {
+      setError(e.response?.data?.error || 'Could not save transcript');
+      return false;
+    } finally {
+      setSavingTranscript(false);
+    }
+  }
+
+  function exportClipMetadata() {
+    downloadBlob(
+      new Blob([formatClipMetadataCsv(clips)], { type: 'text/csv;charset=utf-8' }),
+      `${transcriptFilename(selected?.title)}-clips.csv`
+    );
+  }
+
   async function generateOpusClips() {
     setBusy(true);
     try {
@@ -438,7 +577,8 @@ export default function App() {
     if (selected) {
       const podcast = (await api.get(`/podcasts/${selected._id}`)).data;
       setSelected(podcast);
-      setClips((await api.get(`/podcasts/${selected._id}/clips`)).data);
+      const nextClips = (await api.get(`/podcasts/${selected._id}/clips`)).data;
+      setClips(nextClips);
     }
   }
 
@@ -449,12 +589,22 @@ export default function App() {
     } catch (e) {
       setError(e.response?.data?.error || 'Could not save clip changes');
     }
+
+    async function updatePodcastMetadata(podcast, patch) {
+      try {
+        const { data } = await api.patch(`/podcasts/${podcast._id}`, patch);
+        setPodcasts(items => items.map(item => item._id === data._id ? data : item));
+        setSelected(current => current?._id === data._id ? { ...current, ...data } : current);
+      } catch (e) {
+        setError(e.response?.data?.error || 'Could not save project organization');
+      }
+    }
   }
 
-  async function renderClip(id) {
+  async function renderClip(id, aspectRatio = '9:16') {
     setBusy(true);
     try {
-      await api.post(`/podcasts/clips/${id}/render`, { brandText: 'VANDE DIGITAL' });
+      await api.post(`/podcasts/clips/${id}/render`, { brandText: 'VANDE DIGITAL', aspectRatio });
       setError('Render queued. Progress will update here.');
       await refresh();
     } catch (e) {
@@ -462,6 +612,25 @@ export default function App() {
     } finally {
       setBusy(false);
     }
+  }
+
+  async function previewSourceClip(clip) {
+    if (!selected?._id || !selected.sourceFiles?.some(file => file.kind === 'video')) return;
+    try {
+      const { data } = await api.post(`/podcasts/${selected._id}/source-preview`);
+      setPreviewSource({
+        url: data.url,
+        start: clip.start,
+        end: clip.end,
+        title: clip.title || 'Clip preview',
+      });
+    } catch (e) {
+      setError(e.response?.data?.error || 'Source preview unavailable');
+    }
+  }
+
+  function closeSourcePreview() {
+    setPreviewSource(null);
   }
 
   async function previewClip(id) {
@@ -580,6 +749,8 @@ export default function App() {
           theme={theme}
           onToggleTheme={() => setTheme(current => current === 'dark' ? 'light' : 'dark')}
           onRefresh={page === 'team' ? loadTeam : page === 'dashboard' ? refreshDashboard : refresh}
+          notifications={notifications}
+          onClearNotifications={() => setNotifications([])}
         />
         {error && (
           <div className="notice" role="status" aria-live="polite">
@@ -604,11 +775,16 @@ export default function App() {
               sourceKind,
               speakerKey,
               files,
+              uploadLimits,
               busy,
               podcasts,
               filteredPodcasts,
               podcastSearch,
               podcastStatusFilter,
+              projectFolder,
+              projectTags,
+              folderFilter,
+              folderOptions,
               allPodcastsSelected,
               selectedPodcastIds,
               canDeletePodcasts,
@@ -619,6 +795,9 @@ export default function App() {
             actions={{
               setPodcastSearch,
               setPodcastStatusFilter,
+              setProjectFolder,
+              setProjectTags,
+              setFolderFilter,
               refreshDashboard,
               setTitle,
               setYoutubeUrl,
@@ -629,6 +808,7 @@ export default function App() {
               toggleSelectAllPodcasts,
               deleteSelectedPodcasts,
               open,
+              updatePodcastMetadata,
               togglePodcastSelection,
               stopPodcastJob,
               restartPodcastJob,
@@ -650,6 +830,9 @@ export default function App() {
               selectedExportFormat,
               hasStoryMomentJob,
               hasOpusClipJob,
+              assignees,
+              savingTranscript,
+              previewSource,
             }}
             actions={{
               setSourceKind,
@@ -663,10 +846,14 @@ export default function App() {
               uploadMore,
               setExportFormat,
               exportTranscript,
+              saveTranscript,
+              exportClipMetadata,
               setOpenTranscriptFor,
               updateClip,
               editCameraPlan,
               renderClip,
+              previewSourceClip,
+              closeSourcePreview,
               previewClip,
               downloadClip,
             }}

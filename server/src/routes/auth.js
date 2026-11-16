@@ -107,6 +107,18 @@ r.get(
     res.json(users);
   }),
 );
+r.get(
+  "/assignable-users",
+  auth,
+  allow("admin", "editor"),
+  wrap(async (req, res) => {
+    const users = await User.find({ role: { $in: ["admin", "editor"] } })
+      .select("name role")
+      .sort({ name: 1 })
+      .lean();
+    res.json(users);
+  }),
+);
 r.post(
   "/users",
   auth,

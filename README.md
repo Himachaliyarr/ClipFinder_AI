@@ -20,6 +20,10 @@ Official docs:
 - Transcript segments and provider-specific phrase/word timing metadata persisted in MongoDB.
 - Optional OpenAI-compatible LLM call to propose 15–25 reel candidates with hook/title/caption/score/reason.
 - Clip list, approve/reject, caption editing and activity events.
+- Workspace-wide project folders and tags with dashboard filters.
+- Line-level transcript editing, SubRip/WebVTT downloads, and clip metadata CSV export.
+- Review assignments, Needs review/Approved/Published clip workflow, source-segment preview, and 9:16/1:1/16:9 render presets.
+- In-app notifications for background processing, reel generation, and render completion/failure.
 - BullMQ/Redis durable transcription and render jobs with retries and a separately supervised worker process.
 - Live background-job progress/failure status, admin team/role management, audit activity, and a production metrics/learning-loop dashboard.
 - Speaker-keyed multi-camera cut plans, 1080x1920 FFmpeg render pipeline, branded ASS captions, trim validation, re-render versioning and authenticated preview endpoint.
@@ -30,7 +34,7 @@ Official docs:
 
 ## Production readiness boundary
 
-BullMQ transcription/render jobs, speaker-keyed camera plans, branded ASS caption burn-in, clip trim/re-render and authenticated preview endpoints are implemented. When at least two isolated mic tracks and matching speaker-keyed camera videos are uploaded, the worker automatically generates a heuristic camera plan for each suggested clip. Editors can review and override it. This RMS-based method is not robust diarization and requires synchronized tracks. This is still not a fully audited production deployment: secure resumable NAS uploads, malware scanning, HTTPS, SSO/2FA, retention policies, backups, provider billing ingestion, provider accuracy comparison, and real-footage QA remain deployment tasks. Deepgram word-level timestamps are implemented but need validation on authorized Hindi/Hinglish recordings. Validate synchronized camera source files and caption font rendering (Roman Hinglish and Devanagari) on your own media before production use.
+BullMQ transcription/render jobs, speaker-keyed camera plans, branded ASS caption burn-in, clip trim/re-render and authenticated preview endpoints are implemented. When at least two isolated mic tracks and matching speaker-keyed camera videos are uploaded, the worker automatically generates a heuristic camera plan for each suggested clip. Editors can review and override it. This RMS-based method is not robust diarization and requires synchronized tracks. This is still not a fully audited production deployment: secure resumable NAS uploads, malware scanning, HTTPS, SSO/2FA, retention policies, off-site backup storage/rotation, provider billing ingestion, provider accuracy comparison, and real-footage QA remain deployment tasks. A manual MongoDB + media backup command is included; schedule and test restore drills before production use. Deepgram word-level timestamps are implemented but need validation on authorized Hindi/Hinglish recordings. Validate synchronized camera source files and caption font rendering (Roman Hinglish and Devanagari) on your own media before production use.
 
 ## Requirements
 
@@ -78,6 +82,9 @@ API health check: http://localhost:5000/api/health
 | `LLM_MODEL` | Defaults to `gpt-4o-mini` |
 | `MEDIA_ROOT` | Local/NAS media directory shared by API and worker |
 | `MAX_UPLOAD_BYTES` | Maximum size for uploaded and imported media (default 5 GiB) |
+| `MAX_UPLOAD_FILES` | Maximum number of files per upload request (default 12, maximum 50) |
+| `BACKUP_ROOT` | Backup output directory (default `./backups`) |
+| `BACKUP_INTERVAL_HOURS` | Scheduled backup interval (default 24 hours; `backup:schedule` only) |
 | `REDIS_URL` | BullMQ Redis connection |
 | `WORKER_CONCURRENCY` | Number of simultaneous background jobs |
 | `FFMPEG_PATH` | FFmpeg executable path |
@@ -94,6 +101,7 @@ YouTube URL import uses `yt-dlp`, installed with the server dependencies, and re
 
 ## API outline
 
+- `GET /api/podcasts/upload-limits` returns the configured per-request file count and per-file size limits for the upload UI
 - `POST /api/auth/login`
 - `POST /api/auth/register` (disabled unless `INVITE_CODE` is configured; requires a 12+ character password)
 - `GET /api/podcasts`
@@ -103,10 +111,25 @@ YouTube URL import uses `yt-dlp`, installed with the server dependencies, and re
 - `POST /api/podcasts/:id/select-clips` (generate suggestions from a saved transcript without re-transcribing)
 - `GET /api/podcasts/:id`
 - `GET /api/podcasts/:id/transcript`
+- `PATCH /api/podcasts/:id/transcript` (save transcript text or timed line edits)
 - `GET /api/podcasts/:id/clips`
-- `PATCH /api/podcasts/clips/:clipId` (trim, captions and camera plan)
+- `PATCH /api/podcasts/:id` (update folder and tags)
+- `PATCH /api/podcasts/clips/:clipId` (trim, captions, assignment, and workflow status)
 - `POST /api/podcasts/clips/:clipId/render` (enqueue branded render)
 - `GET /api/podcasts/clips/:clipId/render` (authenticated MP4 preview; originals are not exposed as public static files)
+- `POST /api/podcasts/:id/source-preview` (create a short-lived authenticated source-preview link)
+
+## Backups
+
+Install MongoDB Database Tools (`mongodump`/`mongorestore`) on the API host, configure `MONGODB_URI`, and run:
+
+```bash
+npm --workspace server run backup
+```
+
+For recurring backups, run `npm --workspace server run backup:schedule` under a process supervisor. It creates one backup at startup and repeats at `BACKUP_INTERVAL_HOURS` (default 24).
+
+The command writes a compressed database archive and, when `MEDIA_ROOT` exists, a media copy beneath `BACKUP_ROOT`. Restore the database with `mongorestore --gzip --archive=<backup-folder>/database.archive.gz`; restore the matching `media` folder to `MEDIA_ROOT`. Keep backups outside the repository, restrict access because they contain client media and transcripts, copy them off-host, rotate old backups, and regularly test restoration.
 
 ## Speaker detection utility
 

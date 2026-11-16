@@ -4,17 +4,21 @@ import path from 'node:path';
 import fs from 'node:fs';
 import { nanoid } from 'nanoid';
 import mongoose from 'mongoose';
-import { Podcast, Clip, Activity } from '../models/index.js';
+import jwt from 'jsonwebtoken';
+import { Podcast, Clip, Activity, User } from '../models/index.js';
 import { auth, allow } from '../middleware/auth.js';
 import { enqueueYoutubeTranscription, enqueueTranscription, enqueueClipSelection, enqueueStorySelection, enqueueOpusClipProject, enqueueRender, mediaQueue, requestMediaJobCancellation } from '../queue.js';
 import { normalizeYouTubeUrl } from '../services/youtube.js';
 import { applySpeakerCorrections } from '../services/transcript.js';
+import { normalizeFolder, normalizeTags } from '../services/projectMetadata.js';
+import { MAX_UPLOAD_BYTES, MAX_UPLOAD_FILES } from '../config/limits.js';
 
 const r = Router();
 const root = path.resolve(process.env.MEDIA_ROOT || './server/storage');
 fs.mkdirSync(root, { recursive: true });
 const wrap = fn => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
 const validId = id => mongoose.isValidObjectId(id);
+const escapeRegex = value => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 // Keep storage paths private; API responses expose metadata but not filesystem locations.
 const publicPodcast = doc => { const obj = doc.toObject ? doc.toObject() : doc; if (obj.sourceFiles) obj.sourceFiles = obj.sourceFiles.map(({ path: _path, ...f }) => f); delete obj.audioPath; return obj; };
 const publicClip = doc => { const obj = doc.toObject ? doc.toObject() : doc; delete obj.renderPath; return obj; };
@@ -25,14 +29,30 @@ const storage = multer.diskStorage({
   },
   filename: (req, file, cb) => cb(null, `${nanoid()}-${path.basename(file.originalname).replace(/[^\w.-]/g, '_')}`)
 });
-const upload = multer({ storage, limits: { fileSize: Number(process.env.MAX_UPLOAD_BYTES || 5 * 1024 * 1024 * 1024), files: 12 },
+const upload = multer({ storage, limits: { fileSize: MAX_UPLOAD_BYTES, files: MAX_UPLOAD_FILES },
   fileFilter: (req, file, cb) => /^(audio|video)\//.test(file.mimetype) ? cb(null, true) : cb(Object.assign(new Error('Only audio and video files are allowed'), { status: 400 }))
 });
-r.get('/', auth, wrap(async (req, res) => res.json((await Podcast.find().sort({ createdAt: -1 }).select('-transcript -deepgramTranscript -sarvamTranscript -sarvamSegments -segments -opusClipClips -storyMoments')).map(publicPodcast))));
+r.get('/upload-limits', auth, (req, res) => res.json({ maxFiles: MAX_UPLOAD_FILES, maxFileBytes: MAX_UPLOAD_BYTES }));
+r.get('/', auth, wrap(async (req, res) => {
+  const filter = {};
+  if (typeof req.query.folder === 'string') filter.folder = req.query.folder;
+  if (typeof req.query.tag === 'string' && req.query.tag.trim()) filter.tags = req.query.tag.trim();
+  if (typeof req.query.q === 'string' && req.query.q.trim()) {
+    const query = new RegExp(escapeRegex(req.query.q.trim().slice(0, 100)), 'i');
+    filter.$or = [{ title: query }, { tags: query }];
+  }
+  res.json((await Podcast.find(filter).sort({ createdAt: -1 }).select('-transcript -deepgramTranscript -sarvamTranscript -sarvamSegments -segments -opusClipClips -storyMoments')).map(publicPodcast));
+}));
 r.post('/', auth, allow('admin','editor'), wrap(async (req, res) => {
   const title = String(req.body?.title || '').trim().slice(0, 180);
   if (!title) return res.status(400).json({ error: 'Podcast title is required' });
-  const p = await Podcast.create({ title, description: req.body.description, createdBy: req.user.id });
+  const p = await Podcast.create({
+    title,
+    description: req.body.description,
+    folder: normalizeFolder(req.body.folder),
+    tags: normalizeTags(req.body.tags ?? []),
+    createdBy: req.user.id
+  });
   await Activity.create({ user: req.user.id, action: 'podcast_created', entityType: 'Podcast', entityId: p._id });
   res.status(201).json(p);
 }));
@@ -42,7 +62,14 @@ r.post('/youtube', auth, allow('admin','editor'), wrap(async (req, res) => {
   if (!title) return res.status(400).json({ error: 'Podcast title is required' });
   if (!url) return res.status(400).json({ error: 'Enter a valid YouTube video link' });
 
-  const podcast = await Podcast.create({ title, sourceUrl: url, status: 'queued', createdBy: req.user.id });
+  const podcast = await Podcast.create({
+    title,
+    sourceUrl: url,
+    folder: normalizeFolder(req.body.folder),
+    tags: normalizeTags(req.body.tags ?? []),
+    status: 'queued',
+    createdBy: req.user.id
+  });
   try {
     // Persist the queue id and progress alongside the podcast for dashboard polling.
     const job = await enqueueYoutubeTranscription(podcast.id, req.user.id, url);
@@ -68,7 +95,7 @@ r.post('/:id/files', auth, allow('admin','editor'), wrap(async (req, res, next) 
   if (!validId(req.params.id)) return res.status(400).json({ error: 'Invalid podcast id' });
   const p = await Podcast.findById(req.params.id);
   if (!p) return res.status(404).json({ error: 'Podcast not found' });
-  upload.array('files', 12)(req, res, async err => {
+  upload.array('files', MAX_UPLOAD_FILES)(req, res, async err => {
     if (err) return next(err);
     try {
       if (!req.files?.length) return res.status(400).json({ error: 'Select at least one audio or video file' });
@@ -102,6 +129,9 @@ r.post('/:id/select-clips', auth, allow('admin','editor'), wrap(async (req, res)
   if (!validId(req.params.id)) return res.status(400).json({ error: 'Invalid podcast id' });
   const podcast = await Podcast.findById(req.params.id);
   if (!podcast) return res.status(404).json({ error: 'Podcast not found' });
+  if (['downloading','queued','processing'].includes(podcast.status)) {
+    return res.status(409).json({ error: 'Podcast processing is already in progress' });
+  }
   if (!podcast.transcript || !podcast.duration) return res.status(400).json({ error: 'Transcribe the podcast before generating clip suggestions' });
   const job = await enqueueClipSelection(podcast.id, req.user.id);
   podcast.status = 'processing';
@@ -270,7 +300,7 @@ r.get('/analytics/summary', auth, wrap(async (req, res) => {
   const [podcastCount, clipCount, approvedCount, aggregate] = await Promise.all([
     Podcast.countDocuments(),
     Clip.countDocuments({ createdByAI: true }),
-    Clip.countDocuments({ createdByAI: true, status: { $in: ['approved', 'rendered'] } }),
+    Clip.countDocuments({ createdByAI: true, status: { $in: ['approved', 'rendered', 'published'] } }),
     Clip.aggregate([{ $group: { _id: null, totalViews: { $sum: { $ifNull: ['$performance.views', 0] } }, averageWatchTime: { $avg: '$performance.watchTime' } } }])
   ]);
   const metrics = aggregate[0] || {};
@@ -284,7 +314,7 @@ r.get('/analytics/summary', auth, wrap(async (req, res) => {
   });
 }));
 r.get('/analytics/learning-examples', auth, wrap(async (req, res) => {
-  const examples = await Clip.find({ status: { $in: ['approved', 'rendered'] }, 'performance.views': { $gt: 0 } })
+  const examples = await Clip.find({ status: { $in: ['approved', 'rendered', 'published'] }, 'performance.views': { $gt: 0 } })
     .sort({ 'performance.views': -1, updatedAt: -1 })
     .limit(20)
     .select('title hook caption reason score performance status')
@@ -305,11 +335,123 @@ r.get('/analytics/activity', auth, allow('admin'), wrap(async (req, res) => {
     return { ...event, details };
   }));
 }));
+r.get('/notifications', auth, wrap(async (req, res) => {
+  const sinceValue = typeof req.query.since === 'string' ? new Date(req.query.since) : null;
+  if (!sinceValue || !Number.isFinite(sinceValue.getTime())) {
+    return res.status(400).json({ error: 'A valid since timestamp is required' });
+  }
+  const actions = [
+    'transcription_completed',
+    'youtube_transcription_completed',
+    'clip_suggestions_generated',
+    'story_moments_generated',
+    'opusclip_reels_generated',
+    'clip_rendered',
+    'background_job_failed',
+  ];
+  const events = await Activity.find({ action: { $in: actions }, createdAt: { $gt: sinceValue } })
+    .sort({ createdAt: -1 })
+    .limit(50)
+    .lean();
+  const podcastIds = events.filter(event => event.entityType === 'Podcast').map(event => event.entityId);
+  const clipIds = events.filter(event => event.entityType === 'Clip').map(event => event.entityId);
+  const [podcasts, clips] = await Promise.all([
+    Podcast.find({ _id: { $in: podcastIds } }).select('title').lean(),
+    Clip.find({ _id: { $in: clipIds } }).populate('podcast', 'title').select('title podcast').lean(),
+  ]);
+  const podcastTitles = new Map(podcasts.map(podcast => [String(podcast._id), podcast.title]));
+  const clipDetails = new Map(clips.map(clip => [String(clip._id), clip]));
+  const titles = {
+    transcription_completed: 'Transcription complete',
+    youtube_transcription_completed: 'Transcription complete',
+    clip_suggestions_generated: 'Clip suggestions ready',
+    story_moments_generated: 'Story moments ready',
+    opusclip_reels_generated: 'Generated reels ready',
+    clip_rendered: 'Clip render ready',
+    background_job_failed: 'Background job failed',
+  };
+  res.json(events.map(event => {
+    const clip = event.entityType === 'Clip' ? clipDetails.get(String(event.entityId)) : null;
+    const podcastTitle = event.entityType === 'Podcast'
+      ? podcastTitles.get(String(event.entityId))
+      : clip?.podcast?.title;
+    const details = event.details || {};
+    const target = podcastTitle || clip?.title || 'Project';
+    return {
+      id: String(event._id),
+      title: titles[event.action] || 'Background job update',
+      message: details.message
+        ? (details.message.startsWith(`${target}:`) ? details.message : `${target}: ${details.message}`)
+        : `${target}${clip?.title && podcastTitle ? ` · ${clip.title}` : ''}`,
+      createdAt: event.createdAt,
+    };
+  }));
+}));
+r.patch('/:id', auth, allow('admin','editor'), wrap(async (req, res) => {
+  if (!validId(req.params.id)) return res.status(400).json({ error: 'Invalid podcast id' });
+  const podcast = await Podcast.findById(req.params.id);
+  if (!podcast) return res.status(404).json({ error: 'Podcast not found' });
+  const changed = [];
+  if (req.body?.folder !== undefined) {
+    podcast.folder = normalizeFolder(req.body.folder);
+    changed.push('folder');
+  }
+  if (req.body?.tags !== undefined) {
+    podcast.tags = normalizeTags(req.body.tags);
+    changed.push('tags');
+  }
+  if (!changed.length) return res.status(400).json({ error: 'Provide folder or tags to update' });
+  await podcast.save();
+  await Activity.create({ user: req.user.id, action: 'podcast_organization_updated', entityType: 'Podcast', entityId: podcast._id, details: { changed } });
+  res.json(publicPodcast(podcast));
+}));
+r.post('/:id/source-preview', auth, wrap(async (req, res) => {
+  if (!validId(req.params.id)) return res.status(400).json({ error: 'Invalid podcast id' });
+  const podcast = await Podcast.findById(req.params.id).select('sourceFiles');
+  if (!podcast) return res.status(404).json({ error: 'Podcast not found' });
+  const source = podcast.sourceFiles.find(file => file.kind === 'video' && file.path);
+  if (!source) return res.status(404).json({ error: 'No uploaded video source is available to preview' });
+  const previewToken = jwt.sign(
+    { purpose: 'clip-source-preview', podcastId: podcast.id, userId: req.user.id },
+    process.env.JWT_SECRET,
+    { expiresIn: '5m' }
+  );
+  res.json({ url: `/api/podcasts/${podcast.id}/source?previewToken=${encodeURIComponent(previewToken)}` });
+}));
+r.get('/:id/source', wrap(async (req, res) => {
+  if (!validId(req.params.id)) return res.status(400).json({ error: 'Invalid podcast id' });
+  let claims;
+  try {
+    claims = jwt.verify(String(req.query.previewToken || ''), process.env.JWT_SECRET);
+  } catch {
+    return res.status(401).json({ error: 'Source preview link is invalid or expired' });
+  }
+  if (claims.purpose !== 'clip-source-preview' || claims.podcastId !== req.params.id) {
+    return res.status(403).json({ error: 'Source preview link is not valid for this podcast' });
+  }
+  const user = await User.findById(claims.userId).select('_id');
+  if (!user) return res.status(401).json({ error: 'User not found' });
+  const podcast = await Podcast.findById(req.params.id).select('sourceFiles');
+  if (!podcast) return res.status(404).json({ error: 'Podcast not found' });
+  const source = podcast.sourceFiles.find(file => file.kind === 'video' && file.path);
+  if (!source) return res.status(404).json({ error: 'No uploaded video source is available to preview' });
+  const resolved = path.resolve(source.path);
+  const rootPrefix = root.endsWith(path.sep) ? root : `${root}${path.sep}`;
+  if (!resolved.startsWith(rootPrefix)) return res.status(403).json({ error: 'Invalid media source path' });
+  res.set('Cache-Control', 'private, no-store');
+  await Activity.create({ user: user._id, action: 'source_preview_accessed', entityType: 'Podcast', entityId: podcast._id });
+  res.type(path.extname(resolved)).sendFile(resolved, err => {
+    if (err && !res.headersSent) res.status(404).json({ error: 'Source media file not found' });
+  });
+}));
 r.get('/:id', auth, wrap(async (req, res) => { if (!validId(req.params.id)) return res.status(400).json({ error: 'Invalid podcast id' }); const p = await Podcast.findById(req.params.id); if (!p) return res.status(404).json({ error: 'Not found' }); res.json(publicPodcast(p)); }));
-r.get('/:id/clips', auth, wrap(async (req, res) => { if (!validId(req.params.id)) return res.status(400).json({ error: 'Invalid podcast id' }); res.json((await Clip.find({ podcast: req.params.id }).sort({ score: -1 })).map(publicClip)); }));
+r.get('/:id/clips', auth, wrap(async (req, res) => {
+  if (!validId(req.params.id)) return res.status(400).json({ error: 'Invalid podcast id' });
+  res.json((await Clip.find({ podcast: req.params.id }).populate('assignedTo', 'name email role').sort({ score: -1 })).map(publicClip));
+}));
 r.patch('/clips/:clipId', auth, allow('admin','editor'), wrap(async (req, res) => {
   if (!validId(req.params.clipId)) return res.status(400).json({ error: 'Invalid clip id' });
-  const allowed = ['start','end','hook','title','caption','status','editorNotes','cameraSegments','captionSegments','performance'];
+  const allowed = ['start','end','hook','title','caption','status','assignedTo','editorNotes','cameraSegments','captionSegments','performance'];
   const update = {}; for (const k of allowed) if (req.body?.[k] !== undefined) update[k] = req.body[k];
   if (update.performance !== undefined) {
     if (!update.performance || typeof update.performance !== 'object' || Array.isArray(update.performance)) return res.status(400).json({ error: 'Performance must include views or watch time' });
@@ -323,6 +465,14 @@ r.patch('/clips/:clipId', auth, allow('admin','editor'), wrap(async (req, res) =
   }
   const existing = await Clip.findById(req.params.clipId); if (!existing) return res.status(404).json({ error: 'Clip not found' });
   const podcast = await Podcast.findById(existing.podcast); if (!podcast) return res.status(404).json({ error: 'Podcast not found' });
+  if (update.assignedTo !== undefined) {
+    if (update.assignedTo === null || update.assignedTo === '') update.assignedTo = null;
+    else {
+      if (!validId(update.assignedTo)) return res.status(400).json({ error: 'Invalid editor assignment' });
+      const assignee = await User.findById(update.assignedTo).select('role');
+      if (!assignee || !['admin','editor'].includes(assignee.role)) return res.status(400).json({ error: 'Clips can only be assigned to an active admin or editor' });
+    }
+  }
   if (update.performance) {
     update.performance = {
       views: update.performance.views ?? existing.performance?.views ?? 0,
@@ -331,11 +481,19 @@ r.patch('/clips/:clipId', auth, allow('admin','editor'), wrap(async (req, res) =
   }
   const start = Number(update.start ?? existing.start), end = Number(update.end ?? existing.end);
   if (!Number.isFinite(start) || !Number.isFinite(end) || start < 0 || end <= start || (podcast.duration && end > podcast.duration + 0.25)) return res.status(400).json({ error: 'Trim must be within the source duration and end must be greater than start' });
-  if (update.status && !['suggested','approved','rejected','rendered'].includes(update.status)) return res.status(400).json({ error: 'Invalid clip status' });
+  if (update.status && !['suggested','approved','rejected','rendered','published'].includes(update.status)) return res.status(400).json({ error: 'Invalid clip status' });
+  if (existing.status === 'published' && update.status && update.status !== 'published') {
+    return res.status(409).json({ error: 'Published clips cannot return to an earlier workflow stage' });
+  }
+  if (update.status === 'published' && !['approved','rendered','published'].includes(existing.status)) {
+    return res.status(409).json({ error: 'Approve a clip before publishing it' });
+  }
   if (update.cameraSegments && (!Array.isArray(update.cameraSegments) || update.cameraSegments.some(s => !Number.isFinite(Number(s.start)) || !Number.isFinite(Number(s.end)) || Number(s.start) < 0 || Number(s.end) <= Number(s.start) || Number(s.end) > end-start+0.25))) return res.status(400).json({ error: 'Camera segments must use valid clip-relative time ranges' });
   if (update.cameraSegments && update.cameraSegments.some(s => !podcast.sourceFiles.some(f => f.speaker === s.speaker && f.kind === 'video'))) return res.status(400).json({ error: 'Each camera segment speaker must match an uploaded video camera speaker key' });
   Object.assign(existing, update); await existing.save();
-  await Activity.create({ user: req.user.id, action: 'clip_updated', entityType: 'Clip', entityId: existing.id, details: update }); res.json(publicClip(existing));
+  await Activity.create({ user: req.user.id, action: update.status ? `clip_${update.status}` : update.assignedTo !== undefined ? 'clip_assigned' : 'clip_updated', entityType: 'Clip', entityId: existing.id, details: update });
+  await existing.populate('assignedTo', 'name email role');
+  res.json(publicClip(existing));
 }));
 r.delete('/:id', auth, allow('admin','editor'), wrap(async (req, res) => {
   if (!validId(req.params.id)) return res.status(400).json({ error: 'Invalid podcast id' });
@@ -368,7 +526,16 @@ r.post('/clips/:clipId/render', auth, allow('admin','editor'), wrap(async (req, 
   if (!validId(req.params.clipId)) return res.status(400).json({ error: 'Invalid clip id' });
   const clip = await Clip.findById(req.params.clipId); if (!clip) return res.status(404).json({ error: 'Clip not found' });
   const podcast = await Podcast.findById(clip.podcast); if (!podcast) return res.status(404).json({ error: 'Podcast not found' });
-  const settings = { brandText: String(req.body?.brandText || 'VANDE DIGITAL').slice(0,80), fontName: String(req.body?.fontName || 'Arial').replace(/[^\w -]/g,'').slice(0,40), primaryColour: req.body?.primaryColour || '&H00FFFFFF', accentColour: req.body?.accentColour || '&H00419BC7', outlineColour: req.body?.outlineColour || '&H00000000' };
+  const aspectRatio = req.body?.aspectRatio ?? '9:16';
+  if (!['9:16', '1:1', '16:9'].includes(aspectRatio)) return res.status(400).json({ error: 'Aspect ratio must be 9:16, 1:1, or 16:9' });
+  const settings = {
+    brandText: String(req.body?.brandText || 'VANDE DIGITAL').slice(0,80),
+    fontName: String(req.body?.fontName || 'Arial').replace(/[^\w -]/g,'').slice(0,40),
+    primaryColour: req.body?.primaryColour || '&H00FFFFFF',
+    accentColour: req.body?.accentColour || '&H00419BC7',
+    outlineColour: req.body?.outlineColour || '&H00000000',
+    aspectRatio,
+  };
   const job = await enqueueRender(clip.id, req.user.id, settings);
   clip.renderJobId = job.id;
   clip.renderStatus = 'queued';
@@ -389,6 +556,59 @@ r.patch('/:id/transcript', auth, allow('admin','editor'), wrap(async (req, res) 
   if (!validId(req.params.id)) return res.status(400).json({ error: 'Invalid podcast id' });
   const podcast = await Podcast.findById(req.params.id);
   if (!podcast) return res.status(404).json({ error: 'Podcast not found' });
+  if (['downloading','queued','processing'].includes(podcast.status)) {
+    return res.status(409).json({ error: 'Wait for podcast processing to finish before editing the transcript' });
+  }
+  if (req.body?.transcript !== undefined && !Array.isArray(req.body?.segments)) {
+    if (typeof req.body.transcript !== 'string' || req.body.transcript.length > 2_000_000) {
+      return res.status(400).json({ error: 'Transcript text must be a string no longer than 2 MB' });
+    }
+    const transcript = req.body.transcript.trim();
+    if (!transcript) return res.status(400).json({ error: 'Transcript text cannot be empty' });
+    podcast.transcript = transcript;
+    if (podcast.status === 'clips_ready') podcast.status = 'transcribed';
+    podcast.jobMessage = 'Transcript edited. Regenerate clip suggestions to use the changes.';
+    await podcast.save();
+    await Activity.create({ user: req.user.id, action: 'transcript_text_edited', entityType: 'Podcast', entityId: podcast._id });
+    return res.json(publicPodcast(podcast));
+  }
+  if (Array.isArray(req.body?.segments)) {
+    const input = req.body.segments;
+    if (!input.length || input.length > 10000) {
+      return res.status(400).json({ error: 'Provide between 1 and 10,000 transcript lines' });
+    }
+    const segments = [];
+    for (const item of input) {
+      const start = Number(item?.start);
+      const end = Number(item?.end);
+      const text = typeof item?.text === 'string' ? item.text.trim() : '';
+      const speaker = item?.speaker ?? null;
+      if (!Number.isFinite(start) || !Number.isFinite(end) || start < 0 || end <= start
+        || (podcast.duration && end > podcast.duration + 0.25)) {
+        return res.status(400).json({ error: 'Transcript line timings must be within the source duration' });
+      }
+      if (!text || text.length > 4000) return res.status(400).json({ error: 'Transcript lines must contain 1–4,000 characters' });
+      if (!(speaker === null || (typeof speaker === 'number' && Number.isFinite(speaker) && speaker >= 0)
+        || (typeof speaker === 'string' && speaker.trim().length > 0 && speaker.length <= 80))) {
+        return res.status(400).json({ error: 'Speaker must be a detected speaker label or null' });
+      }
+      segments.push({ start, end, text, speaker });
+    }
+    segments.sort((a, b) => a.start - b.start);
+    podcast.segments = segments;
+    podcast.transcript = segments.map(segment => segment.text).join(' ');
+    if (podcast.status === 'clips_ready') podcast.status = 'transcribed';
+    podcast.jobMessage = 'Transcript edited. Regenerate clip suggestions to use the changes.';
+    await podcast.save();
+    await Activity.create({
+      user: req.user.id,
+      action: 'transcript_edited',
+      entityType: 'Podcast',
+      entityId: podcast._id,
+      details: { lineCount: segments.length }
+    });
+    return res.json(publicPodcast(podcast));
+  }
   const input = req.body?.speakerCorrections;
   if (!Array.isArray(input) || !input.length || input.length > 10000) {
     return res.status(400).json({ error: 'Provide speaker corrections for transcript lines' });

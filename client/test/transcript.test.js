@@ -1,6 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { formatTranscriptForExport, formatTranscriptJson, getTranscriptLines } from '../src/utils/transcript.js';
+import {
+  formatClipMetadataCsv,
+  formatTranscriptForExport,
+  formatTranscriptJson,
+  formatTranscriptSrt,
+  formatTranscriptVtt,
+  getTranscriptLines,
+} from '../src/utils/transcript.js';
 
 test('groups word timings by sentence and starts a new line when the speaker changes', () => {
   const lines = getTranscriptLines([
@@ -52,4 +59,17 @@ test('exports JSON with transcript metadata and normalized timed segments', () =
     transcript: 'Hello there.',
     segments: [{ start: 0.1, end: 0.7, speaker: 0, text: 'Hello there.' }],
   });
+});
+
+test('exports timed subtitles in SRT and VTT formats', () => {
+  const segments = [{ start: 1.234, end: 2.5, text: 'Hello, world.' }];
+  assert.equal(formatTranscriptSrt(segments), '1\n00:00:01,234 --> 00:00:02,500\nHello, world.');
+  assert.equal(formatTranscriptVtt(segments), 'WEBVTT\n\n00:00:01.234 --> 00:00:02.500\nHello, world.');
+});
+
+test('exports clip metadata as escaped CSV', () => {
+  assert.equal(
+    formatClipMetadataCsv([{ title: 'A "quote"', start: 1, end: 2, caption: 'a,b', status: 'approved', assignedTo: { name: 'Editor' } }]),
+    '\uFEFF"Title","Start (seconds)","End (seconds)","Hook","Caption","Status","Assigned editor"\r\n"A ""quote""","1","2","","a,b","approved","Editor"'
+  );
 });

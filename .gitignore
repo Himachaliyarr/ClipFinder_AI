@@ -4,6 +4,7 @@ client/dist
 server/uploads
 server/storage
 server/server/storage
+backups
 *.log
 .DS_Store
 desktop.ini

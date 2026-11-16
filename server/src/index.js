@@ -1,5 +1,6 @@
 import './config/env.js';
 import express from 'express';
+import { randomUUID } from 'node:crypto';
 import cors from 'cors';
 import rateLimit from 'express-rate-limit';
 import bcrypt from 'bcryptjs';
@@ -42,6 +43,11 @@ const app = express();
 app.disable('x-powered-by');
 const allowedOrigins = (process.env.CORS_ORIGIN || 'http://localhost:5173').split(',').map(x => x.trim());
 app.use(cors({ origin: (origin, cb) => !origin || allowedOrigins.includes(origin) ? cb(null, true) : cb(new Error('Origin not allowed by CORS')) }));
+app.use((req, res, next) => {
+  req.requestId = randomUUID();
+  res.setHeader('X-Request-Id', req.requestId);
+  next();
+});
 app.use(express.json({ limit: '10mb' }));
 app.use(rateLimit({ windowMs: 60_000, max: 180, standardHeaders: true, legacyHeaders: false }));
 app.get('/api/health', (req, res) => res.json({ ok: true, service: 'ClipFinder AI' }));
@@ -50,10 +56,25 @@ app.use('/api/podcasts', podcastRoutes);
 // Media is deliberately NOT mounted as a public static directory. Originals and renders
 // are served only through authenticated API endpoints.
 app.use((err, req, res, next) => {
-  console.error(err);
   if (res.headersSent) return next(err);
-  const status = err.status || (err.name === 'MulterError' ? 400 : 500);
-  res.status(status).json({ error: status >= 500 ? 'Internal server error' : err.message });
+  const status = err.status || (err.code === 'LIMIT_FILE_SIZE' ? 413 : err.name === 'MulterError' ? 400 : 500);
+  console.error(JSON.stringify({
+    level: 'error',
+    requestId: req.requestId,
+    method: req.method,
+    path: req.path,
+    status,
+    errorName: err.name || 'Error',
+    message: String(err.message || 'Unknown error').slice(0, 1000),
+  }));
+  const message = err.code === 'LIMIT_FILE_SIZE'
+    ? 'A file exceeds the configured upload-size limit'
+    : err.code === 'LIMIT_FILE_COUNT'
+      ? 'This upload exceeds the configured file-count limit'
+      : status >= 500
+        ? 'Internal server error'
+        : err.message;
+  res.status(status).json({ error: message, requestId: req.requestId });
 });
 const port = Number(process.env.PORT || 5000);
 connectDB().then(configureAdminFromEnvironment).then(() => app.listen(port, () => console.log(`ClipFinder API running on ${port}`)))

@@ -300,7 +300,7 @@ async function processMediaJob(job, signal) {
 
     let moments = await Clip.find({
       podcast: podcast._id,
-      status: { $in: ['suggested', 'approved', 'rendered'] }
+      status: { $in: ['suggested', 'approved', 'rendered', 'published'] }
     })
       .sort({ score: -1, updatedAt: -1 })
       .limit(8)
@@ -310,7 +310,7 @@ async function processMediaJob(job, signal) {
     if (!moments.length) {
       const examples = await Clip.find({
         podcast: { $ne: podcast._id },
-        status: { $in: ['approved', 'rendered'] }
+        status: { $in: ['approved', 'rendered', 'published'] }
       })
         .sort({ 'performance.views': -1, updatedAt: -1 })
         .limit(20)
@@ -403,7 +403,7 @@ async function processMediaJob(job, signal) {
     await clip.save();
     await job.updateProgress({ percent: 10, message: 'Preparing video render' });
     const result=await renderClip({clip,podcast,settings:job.data.settings||{}});
-    clip.renderPath=result.output; clip.status='rendered';
+    clip.renderPath=result.output;
     clip.renderVersion=(clip.renderVersion||0)+1;
     clip.renderSettings=job.data.settings||{};
     clip.renderStatus='completed';
@@ -501,12 +501,32 @@ worker.on('failed', async (job, err) => {
       }
     }
     if (job?.name === 'render-clip') {
+      const retrying = job.attemptsMade < (job.opts.attempts || 1);
       await Clip.findByIdAndUpdate(job.data.clipId, {
-        renderStatus: 'failed',
-        renderError: err.message.slice(0, 2000)
+        renderStatus: retrying ? 'processing' : 'failed',
+        ...(retrying ? {} : { renderError: err.message.slice(0, 2000) })
       });
     }
-  } catch (updateError) { console.error('Could not persist failed job status:', updateError); }
+    const retrying = job && job.attemptsMade < (job.opts.attempts || 1);
+    if (job?.data?.userId && !retrying) {
+      const entityType = job.name === 'render-clip' ? 'Clip' : 'Podcast';
+      const entityId = entityType === 'Clip' ? job.data.clipId : job.data.podcastId;
+      const clip = entityType === 'Clip' ? await Clip.findById(entityId).select('title podcast').lean() : null;
+      const podcast = await Podcast.findById(entityType === 'Clip' ? clip?.podcast : entityId).select('title').lean();
+      await Activity.create({
+        user: job.data.userId,
+        action: 'background_job_failed',
+        entityType,
+        entityId,
+        details: {
+          jobName: job.name,
+          message: `${podcast?.title || clip?.title || 'Project'}: ${err.message.slice(0, 350)}`,
+        },
+      });
+    }
+  } catch (updateError) {
+    console.error(JSON.stringify({ level: 'error', jobId: job?.id, error: 'Could not persist failed job status', message: updateError.message }));
+  }
 });
 worker.on('error', err => console.error('BullMQ worker error:', err));
 const shutdown = async signal => { console.log(`Received ${signal}; closing worker`); await worker.close(); await connection.quit(); process.exit(0); };

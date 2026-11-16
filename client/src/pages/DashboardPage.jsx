@@ -11,6 +11,7 @@ export default function DashboardPage({ data, actions }) {
     sourceKind,
     speakerKey,
     files,
+    uploadLimits,
     busy,
     podcasts,
     filteredPodcasts,
@@ -19,6 +20,10 @@ export default function DashboardPage({ data, actions }) {
     canDeletePodcasts,
     podcastSearch,
     podcastStatusFilter,
+    projectFolder,
+    projectTags,
+    folderFilter,
+    folderOptions,
     podcastsLoaded,
     podcastsLoadFailed,
     podcastsLoadError,
@@ -26,6 +31,9 @@ export default function DashboardPage({ data, actions }) {
   const {
     setPodcastSearch,
     setPodcastStatusFilter,
+    setProjectFolder,
+    setProjectTags,
+    setFolderFilter,
     refreshDashboard,
     setTitle,
     setYoutubeUrl,
@@ -36,6 +44,7 @@ export default function DashboardPage({ data, actions }) {
     toggleSelectAllPodcasts,
     deleteSelectedPodcasts,
     open,
+    updatePodcastMetadata,
     togglePodcastSelection,
     stopPodcastJob,
     restartPodcastJob,
@@ -57,12 +66,23 @@ export default function DashboardPage({ data, actions }) {
             <span className="eyebrow">START A PROJECT</span>
             <h3 id="new-podcast-heading">New podcast</h3>
             <p className="muted">Upload a media file or paste a YouTube link to transcribe audio without saving YouTube media locally.</p>
+            {uploadLimits && (
+              <p className="muted">Upload limit: {uploadLimits.maxFiles} files per request, up to {Math.ceil(uploadLimits.maxFileBytes / 1024 ** 3)} GiB each.</p>
+            )}
           </div>
         </div>
         <div className="upload-controls">
           <label>
             <span>Podcast name</span>
             <input value={title ?? ''} onChange={event => setTitle(event.target.value)} placeholder="e.g. Episode 12 — Creator Stories" />
+          </label>
+          <label>
+            <span>Project folder <small>(client, show, campaign)</small></span>
+            <input maxLength="100" value={projectFolder} onChange={event => setProjectFolder(event.target.value)} placeholder="e.g. Client A / Season 2" />
+          </label>
+          <label>
+            <span>Tags <small>(comma separated)</small></span>
+            <input maxLength="819" value={projectTags} onChange={event => setProjectTags(event.target.value)} placeholder="e.g. launch, interview, Hindi" />
           </label>
           {!youtubeUrl.trim() && (
             <>
@@ -131,14 +151,22 @@ export default function DashboardPage({ data, actions }) {
               type="search"
               value={podcastSearch}
               onChange={event => setPodcastSearch(event.target.value)}
-              placeholder="Search podcast titles"
-              aria-label="Search podcast titles"
+              placeholder="Search titles or tags"
+              aria-label="Search podcast titles and tags"
             />
             {podcastSearch && (
               <button type="button" className="clear-search" onClick={() => setPodcastSearch('')} aria-label="Clear podcast search">
                 <X size={16} />
               </button>
             )}
+          </label>
+          <label className="status-filter">
+            <span>Folder</span>
+            <select value={folderFilter} onChange={event => setFolderFilter(event.target.value)} aria-label="Filter podcasts by folder">
+              <option value="all">All folders</option>
+              <option value="">Unfiled</option>
+              {folderOptions.map(folder => <option value={folder} key={folder}>{folder}</option>)}
+            </select>
           </label>
           <label className="status-filter">
             <span>Status</span>
@@ -197,7 +225,7 @@ export default function DashboardPage({ data, actions }) {
             <span className="empty-state-icon"><Search size={22} /></span>
             <h4>No matching podcasts</h4>
             <p className="muted">Try another title or status filter.</p>
-            <button className="secondary" onClick={() => { setPodcastSearch(''); setPodcastStatusFilter('all'); }}>
+            <button className="secondary" onClick={() => { setPodcastSearch(''); setPodcastStatusFilter('all'); setFolderFilter('all'); }}>
               Clear filters
             </button>
           </div>
@@ -211,6 +239,7 @@ export default function DashboardPage({ data, actions }) {
                 selected={selectedPodcastIds.includes(podcast._id)}
                 busy={busy}
                 onOpen={open}
+                onUpdateMetadata={updatePodcastMetadata}
                 onToggleSelection={togglePodcastSelection}
                 onStop={stopPodcastJob}
                 onRestart={restartPodcastJob}

@@ -23,8 +23,15 @@ const assTime = seconds => {
   return `${Math.floor(cs / 360000)}:${String(Math.floor(cs / 6000) % 60).padStart(2,'0')}:${String(Math.floor(cs / 100) % 60).padStart(2,'0')}.${String(cs % 100).padStart(2,'0')}`;
 };
 
-function buildAss(clip, settings, outPath) {
-  const width = 1080, height = 1920;
+export function getRenderDimensions(aspectRatio = '9:16') {
+  if (aspectRatio === '9:16') return { width: 1080, height: 1920 };
+  if (aspectRatio === '1:1') return { width: 1080, height: 1080 };
+  if (aspectRatio === '16:9') return { width: 1920, height: 1080 };
+  throw new Error('Aspect ratio must be 9:16, 1:1, or 16:9');
+}
+
+function buildAss(clip, settings, outPath, width, height) {
+  const scale = Math.max(0.65, height / 1920);
   const font = String(settings.fontName || 'Arial').replace(/[{},]/g, '');
   const primary = assColour(settings.primaryColour, '&H00FFFFFF');
   const outline = assColour(settings.outlineColour, '&H00000000');
@@ -32,8 +39,8 @@ function buildAss(clip, settings, outPath) {
   const lines = [
     '[Script Info]', 'ScriptType: v4.00+', `PlayResX: ${width}`, `PlayResY: ${height}`, 'WrapStyle: 2',
     '[V4+ Styles]', 'Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding',
-    `Style: Brand,${font},58,${primary},${accent},${outline},&H80000000,-1,0,1,4,2,2,70,70,230,1`,
-    `Style: Hook,${font},48,${accent},${primary},${outline},&H80000000,-1,0,1,3,1,8,70,70,120,1`,
+    `Style: Brand,${font},${Math.round(58 * scale)},${primary},${accent},${outline},&H80000000,-1,0,1,4,2,2,${Math.round(70 * scale)},${Math.round(70 * scale)},${Math.round(230 * scale)},1`,
+    `Style: Hook,${font},${Math.round(48 * scale)},${accent},${primary},${outline},&H80000000,-1,0,1,3,1,8,${Math.round(70 * scale)},${Math.round(70 * scale)},${Math.round(120 * scale)},1`,
     '[Events]', 'Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text'
   ];
   const segments = Array.isArray(clip.captionSegments) && clip.captionSegments.length
@@ -54,6 +61,7 @@ function buildAss(clip, settings, outPath) {
  * otherwise the primary source is used for the whole clip.
  */
 export async function renderClip({ clip, podcast, settings = {} }) {
+  const { width, height } = getRenderDimensions(settings.aspectRatio);
   const mediaRoot = path.resolve(process.env.MEDIA_ROOT || './server/storage');
   const outputDir = path.join(mediaRoot, String(podcast._id), 'renders');
   await fs.mkdir(outputDir, { recursive: true });
@@ -80,7 +88,7 @@ export async function renderClip({ clip, podcast, settings = {} }) {
   if (cursor < duration - 0.02) plan.push({ start: cursor, end: duration, file: primary.path });
   if (!plan.length) plan.push({ start: 0, end: duration, file: primary.path });
   for (const seg of plan) { try { await fs.access(seg.file); } catch { throw new Error(`Media source not found: ${seg.file}`); } }
-  await buildAss(clip, settings, ass);
+  await buildAss(clip, settings, ass, width, height);
 
   // Create synchronized camera segments, normalize them, then concatenate. Each input
   // is independently seeked to the podcast time range so multi-camera files stay aligned.
@@ -90,7 +98,7 @@ export async function renderClip({ clip, podcast, settings = {} }) {
       const seg = plan[i];
       const part = path.join(outputDir, `${clip._id}-${nanoid(6)}-${i}.mp4`);
       const args = ['-y', '-ss', String(start + seg.start), '-i', seg.file, '-t', String(seg.end-seg.start),
-        '-vf', 'scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,setsar=1,fps=30',
+        '-vf', `scale=${width}:${height}:force_original_aspect_ratio=increase,crop=${width}:${height},setsar=1,fps=30`,
         '-an', ...videoCodecArgs, '-pix_fmt', 'yuv420p', part];
       await run(process.env.FFMPEG_PATH || 'ffmpeg', args);
       parts.push(part);
