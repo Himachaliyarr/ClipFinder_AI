@@ -520,6 +520,7 @@ worker.on('failed', async (job, err) => {
         entityId,
         details: {
           jobName: job.name,
+          jobId: job.id,
           message: `${podcast?.title || clip?.title || 'Project'}: ${err.message.slice(0, 350)}`,
         },
       });

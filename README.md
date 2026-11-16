@@ -14,7 +14,7 @@ Official docs:
 ## Included today
 
 - Email/password login with rate-limited authentication and roles (`admin`, `editor`, `viewer`) with JWT.
-- Podcast records and multi-file upload (5 GiB default per-file cap; configurable with `MAX_UPLOAD_BYTES`) to `MEDIA_ROOT` (point this to your office NAS mount).
+- Podcast records and resumable multi-file uploads to `MEDIA_ROOT` (point this to your office NAS mount). Resumable uploads support files up to 100 GiB by default in 16 MiB chunks; the legacy multipart endpoint retains its separate 5 GiB default cap.
 - Audio extraction using FFmpeg.
 - Long audio split into 25-second REST chunks and sent to the configured STT provider; Sarvam `saaras:v4` is the default and Deepgram Nova-3 is available for word-timing comparisons.
 - Transcript segments and provider-specific phrase/word timing metadata persisted in MongoDB.
@@ -34,7 +34,7 @@ Official docs:
 
 ## Production readiness boundary
 
-BullMQ transcription/render jobs, speaker-keyed camera plans, branded ASS caption burn-in, clip trim/re-render and authenticated preview endpoints are implemented. When at least two isolated mic tracks and matching speaker-keyed camera videos are uploaded, the worker automatically generates a heuristic camera plan for each suggested clip. Editors can review and override it. This RMS-based method is not robust diarization and requires synchronized tracks. This is still not a fully audited production deployment: secure resumable NAS uploads, malware scanning, HTTPS, SSO/2FA, retention policies, off-site backup storage/rotation, provider billing ingestion, provider accuracy comparison, and real-footage QA remain deployment tasks. A manual MongoDB + media backup command is included; schedule and test restore drills before production use. Deepgram word-level timestamps are implemented but need validation on authorized Hindi/Hinglish recordings. Validate synchronized camera source files and caption font rendering (Roman Hinglish and Devanagari) on your own media before production use.
+BullMQ transcription/render jobs, speaker-keyed camera plans, branded ASS caption burn-in, clip trim/re-render and authenticated preview endpoints are implemented. When at least two isolated mic tracks and matching speaker-keyed camera videos are uploaded, the worker automatically generates a heuristic camera plan for each suggested clip. Editors can review and override it. This RMS-based method is not robust diarization and requires synchronized tracks. This is still not a fully audited production deployment: malware scanning, HTTPS, SSO/2FA, upload quotas, reverse-proxy body-size configuration, retention policies, off-site backup storage/rotation, provider billing ingestion, provider accuracy comparison, and real-footage QA remain deployment tasks. A manual MongoDB + media backup command is included; schedule backups and test restores before production use. Deepgram word-level timestamps are implemented but need validation on authorized Hindi/Hinglish recordings. Validate synchronized camera source files and caption font rendering (Roman Hinglish and Devanagari) on your own media before production use.
 
 ## Requirements
 
@@ -81,8 +81,10 @@ API health check: http://localhost:5000/api/health
 | `LLM_API_KEY` | Clip selection model key |
 | `LLM_MODEL` | Defaults to `gpt-4o-mini` |
 | `MEDIA_ROOT` | Local/NAS media directory shared by API and worker |
-| `MAX_UPLOAD_BYTES` | Maximum size for uploaded and imported media (default 5 GiB) |
+| `MAX_UPLOAD_BYTES` | Maximum size for legacy multipart source uploads (default 5 GiB) |
 | `MAX_UPLOAD_FILES` | Maximum number of files per upload request (default 12, maximum 50) |
+| `MAX_RESUMABLE_UPLOAD_BYTES` | Maximum size for a resumable source file (default 100 GiB) |
+| `UPLOAD_CHUNK_BYTES` | Resumable upload chunk size (default 16 MiB; reverse proxies must allow at least this much request body) |
 | `BACKUP_ROOT` | Backup output directory (default `./backups`) |
 | `BACKUP_INTERVAL_HOURS` | Scheduled backup interval (default 24 hours; `backup:schedule` only) |
 | `REDIS_URL` | BullMQ Redis connection |
@@ -102,6 +104,7 @@ YouTube URL import uses `yt-dlp`, installed with the server dependencies, and re
 ## API outline
 
 - `GET /api/podcasts/upload-limits` returns the configured per-request file count and per-file size limits for the upload UI
+- `POST /api/podcasts/:id/uploads` and `PATCH /api/podcasts/:id/uploads/:uploadId` create and append authenticated resumable upload chunks; `GET` returns the saved offset and `POST .../:uploadId/complete` attaches the completed file
 - `POST /api/auth/login`
 - `POST /api/auth/register` (disabled unless `INVITE_CODE` is configured; requires a 12+ character password)
 - `GET /api/podcasts`
@@ -118,6 +121,9 @@ YouTube URL import uses `yt-dlp`, installed with the server dependencies, and re
 - `POST /api/podcasts/clips/:clipId/render` (enqueue branded render)
 - `GET /api/podcasts/clips/:clipId/render` (authenticated MP4 preview; originals are not exposed as public static files)
 - `POST /api/podcasts/:id/source-preview` (create a short-lived authenticated source-preview link)
+- `GET /api/podcasts/analytics/backup-status` (admin-only latest backup and integrity-check status)
+- `POST /api/podcasts/analytics/backup-restore-test` (admin-only record after a completed restore drill)
+- `POST /api/podcasts/notifications/:activityId/retry` (retry supported failed background jobs)
 
 ## Backups
 
@@ -129,7 +135,7 @@ npm --workspace server run backup
 
 For recurring backups, run `npm --workspace server run backup:schedule` under a process supervisor. It creates one backup at startup and repeats at `BACKUP_INTERVAL_HOURS` (default 24).
 
-The command writes a compressed database archive and, when `MEDIA_ROOT` exists, a media copy beneath `BACKUP_ROOT`. Restore the database with `mongorestore --gzip --archive=<backup-folder>/database.archive.gz`; restore the matching `media` folder to `MEDIA_ROOT`. Keep backups outside the repository, restrict access because they contain client media and transcripts, copy them off-host, rotate old backups, and regularly test restoration.
+The command writes a compressed database archive and, when `MEDIA_ROOT` exists, a media copy beneath `BACKUP_ROOT`. It records recent scheduled successes and failures in `backup-status.json`; admins see those events in-app and can review backup health on **Team & audit**. Run `npm --workspace server run backup:verify` to check the latest archive's gzip integrity and media-directory presence. This check does not restore MongoDB; perform a restore drill against a separate test database, then record the completed drill on **Team & audit**. Restore the database with `mongorestore --gzip --archive=<backup-folder>/database.archive.gz`; restore the matching `media` folder to `MEDIA_ROOT`. Keep backups outside the repository, restrict access because they contain client media and transcripts, copy them off-host, rotate old backups, and regularly test restoration.
 
 ## Speaker detection utility
 

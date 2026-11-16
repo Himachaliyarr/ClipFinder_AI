@@ -49,6 +49,21 @@
   min-height: 44px;
 }
 
+.upload-transfer-progress {
+  display: grid;
+  grid-column: 1 / -1;
+  gap: 6px;
+  min-width: 0;
+  color: #b6b8bf;
+  font-size: 12px;
+}
+
+.upload-transfer-progress progress {
+  width: 100%;
+  height: 8px;
+  accent-color: #c79b41;
+}
+
 .metric-skeletons {
   display: grid;
   grid-column: 1 / -1;
@@ -268,7 +283,7 @@
 .transcript-editor {
   display: grid;
   gap: 12px;
-  margin: 16px 0;
+  margin: 12px 0 0;
 }
 
 .transcript-edit-line {
@@ -280,13 +295,10 @@
 
 .transcript-edit-line textarea {
   min-height: 74px;
+  max-height: 220px;
   width: 100%;
+  resize: vertical;
   color: #eee;
-}
-
-.transcript-edit-actions {
-  display: flex;
-  gap: 8px;
 }
 
 .clip-preview-backdrop {
@@ -420,6 +432,14 @@
   font-size: 11px;
 }
 
+.notification-retry {
+  margin-top: 6px;
+  padding: 6px 9px;
+  color: #eac36e;
+  background: #2a2925;
+  font-size: 11px;
+}
+
 .notification-empty {
   margin: 12px 0 4px;
   font-size: 12px;
@@ -443,6 +463,11 @@
 
 .app[data-theme="light"] .notification-item p {
   color: #4d5563;
+}
+
+.app[data-theme="light"] .notification-retry {
+  color: #725619;
+  background: #f7f0df;
 }
 
 .app[data-theme="light"] .podcast-organization-edit summary {

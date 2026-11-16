@@ -1,0 +1,64 @@
+{
+  "generatedOnPlatform": "win32",
+  "projectType": "webapp",
+  "assertions": [
+    {
+      "name": "client-home-serves",
+      "kind": "http-probe",
+      "startCommand": "npm",
+      "startArgs": [
+        "--workspace",
+        "client",
+        "run",
+        "dev",
+        "--",
+        "--host",
+        "127.0.0.1",
+        "--port",
+        "5173",
+        "--strictPort"
+      ],
+      "url": "http://127.0.0.1:5173/",
+      "verificationMethod": "http-status",
+      "expected": "200",
+      "timeoutSeconds": 120
+    },
+    {
+      "name": "client-builds",
+      "kind": "process",
+      "command": "npm",
+      "args": [
+        "run",
+        "build"
+      ],
+      "verificationMethod": "exit-code",
+      "expected": "0",
+      "timeoutSeconds": 300
+    },
+    {
+      "name": "tests-pass",
+      "kind": "process",
+      "command": "npm",
+      "args": [
+        "test"
+      ],
+      "cwd": "server",
+      "verificationMethod": "test-results",
+      "expected": "0",
+      "timeoutSeconds": 300
+    },
+    {
+      "name": "client-transcript-tests",
+      "kind": "process",
+      "command": "node",
+      "args": [
+        "--test",
+        "test/transcript.test.js"
+      ],
+      "cwd": "client",
+      "verificationMethod": "exit-code",
+      "expected": "0",
+      "timeoutSeconds": 120
+    }
+  ]
+}

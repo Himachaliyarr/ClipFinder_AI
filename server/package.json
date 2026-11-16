@@ -8,6 +8,7 @@
     "worker": "node src/workers/mediaWorker.js",
     "backup": "node src/scripts/backup.js",
     "backup:schedule": "node src/scripts/backup.js --schedule",
+    "backup:verify": "node src/scripts/verifyBackup.js",
     "test": "node --test"
   },
   "dependencies": {

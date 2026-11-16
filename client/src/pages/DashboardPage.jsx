@@ -12,6 +12,7 @@ export default function DashboardPage({ data, actions }) {
     speakerKey,
     files,
     uploadLimits,
+    uploadProgress,
     busy,
     podcasts,
     filteredPodcasts,
@@ -67,7 +68,7 @@ export default function DashboardPage({ data, actions }) {
             <h3 id="new-podcast-heading">New podcast</h3>
             <p className="muted">Upload a media file or paste a YouTube link to transcribe audio without saving YouTube media locally.</p>
             {uploadLimits && (
-              <p className="muted">Upload limit: {uploadLimits.maxFiles} files per request, up to {Math.ceil(uploadLimits.maxFileBytes / 1024 ** 3)} GiB each.</p>
+              <p className="muted">Upload limit: {uploadLimits.maxFiles} files per request, up to {Math.ceil((uploadLimits.maxResumableFileBytes || uploadLimits.maxFileBytes) / 1024 ** 3)} GiB each. Large files resume in chunks.</p>
             )}
           </div>
         </div>
@@ -120,6 +121,12 @@ export default function DashboardPage({ data, actions }) {
           >
             <Upload size={16} /> {busy ? 'Creating…' : youtubeUrl.trim() ? 'Transcribe YouTube link' : 'Create & upload'}
           </button>
+          {uploadProgress && (
+            <div className="upload-transfer-progress" role="status" aria-live="polite">
+              <span>Uploading {uploadProgress.fileName} · {Math.floor(uploadProgress.loaded / 1024 ** 2)} / {Math.ceil(uploadProgress.total / 1024 ** 2)} MiB</span>
+              <progress max={uploadProgress.total} value={uploadProgress.loaded} />
+            </div>
+          )}
         </div>
       </section>
       <section className="metricgrid" aria-label="Production metrics" aria-busy={metricsLoading}>

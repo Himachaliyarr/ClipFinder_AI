@@ -1,8 +1,11 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { formatTranscriptTimestamp } from '../utils/transcript.js';
 
 export const transcriptExportOptions = ['pdf', 'docx', 'txt', 'json', 'srt', 'vtt'];
 export const isSupportedExportFormat = value => transcriptExportOptions.includes(value);
+const makeTranscriptPayload = (lines, text) => lines.length
+  ? { segments: lines.map(line => ({ ...line })) }
+  : { transcript: text };
 
 // This panel keeps transcript viewing/export controls together without owning transcript data.
 export default function TranscriptPanel({
@@ -20,16 +23,79 @@ export default function TranscriptPanel({
   const [editing, setEditing] = useState(false);
   const [draftLines, setDraftLines] = useState([]);
   const [draftText, setDraftText] = useState('');
+  const [undoPayload, setUndoPayload] = useState(null);
+  const saveTranscriptRef = useRef(saveTranscript);
+  const lastSavedPayloadRef = useRef(null);
+  const failedDraftKeyRef = useRef(null);
+  const autosaveTimerRef = useRef(null);
+  const autosaveInFlightRef = useRef(false);
+
+  useEffect(() => {
+    saveTranscriptRef.current = saveTranscript;
+  }, [saveTranscript]);
+
+  useEffect(() => {
+    if (!editing || savingTranscript || !lastSavedPayloadRef.current) return undefined;
+    const payload = makeTranscriptPayload(draftLines, draftText);
+    const key = JSON.stringify(payload);
+    if (key === JSON.stringify(lastSavedPayloadRef.current) || key === failedDraftKeyRef.current) return undefined;
+    failedDraftKeyRef.current = null;
+    autosaveTimerRef.current = setTimeout(async () => {
+      if (autosaveInFlightRef.current) return;
+      autosaveInFlightRef.current = true;
+      const previousPayload = lastSavedPayloadRef.current;
+      try {
+        if (await saveTranscriptRef.current(payload, { silent: true })) {
+          lastSavedPayloadRef.current = payload;
+          setUndoPayload(previousPayload);
+        } else {
+          failedDraftKeyRef.current = key;
+        }
+      } finally {
+        autosaveInFlightRef.current = false;
+      }
+    }, 900);
+    return () => clearTimeout(autosaveTimerRef.current);
+  }, [editing, draftLines, draftText, savingTranscript]);
+
   const beginEditing = () => {
-    setDraftLines(transcriptLines.map(line => ({ ...line })));
-    setDraftText(selected?.transcript || '');
+    const lines = transcriptLines.map(line => ({ ...line }));
+    const text = selected?.transcript || '';
+    lastSavedPayloadRef.current = makeTranscriptPayload(lines, text);
+    failedDraftKeyRef.current = null;
+    setDraftLines(lines);
+    setDraftText(text);
+    setOpenTranscriptFor(selected?._id);
     setEditing(true);
   };
   const handleSave = async () => {
-    const saved = await saveTranscript(draftLines.length
-      ? { segments: draftLines }
-      : { transcript: draftText });
-    if (saved) setEditing(false);
+    clearTimeout(autosaveTimerRef.current);
+    const payload = makeTranscriptPayload(draftLines, draftText);
+    const previousPayload = lastSavedPayloadRef.current;
+    const saved = await saveTranscript(payload);
+    if (saved) {
+      lastSavedPayloadRef.current = payload;
+      failedDraftKeyRef.current = null;
+      if (JSON.stringify(previousPayload) !== JSON.stringify(payload)) setUndoPayload(previousPayload);
+      setEditing(false);
+    }
+  };
+  const handleUndo = async () => {
+    if (!undoPayload) return;
+    clearTimeout(autosaveTimerRef.current);
+    const wasEditing = editing;
+    if (await saveTranscript(undoPayload)) {
+      lastSavedPayloadRef.current = undoPayload;
+      failedDraftKeyRef.current = null;
+      setDraftLines(undoPayload.segments?.map(line => ({ ...line })) || []);
+      setDraftText(undoPayload.transcript || '');
+      setUndoPayload(null);
+      if (!wasEditing) setEditing(false);
+    }
+  };
+  const handleCancel = () => {
+    clearTimeout(autosaveTimerRef.current);
+    setEditing(false);
   };
 
   return (
@@ -66,18 +132,35 @@ export default function TranscriptPanel({
           >
             {transcriptVisible ? 'Hide transcript' : 'Show transcript'}
           </button>
-          <button
-            className="secondary"
-            type="button"
-            onClick={beginEditing}
-            disabled={!hasTranscript || editing || ['downloading', 'queued', 'processing'].includes(selected?.status)}
-          >
-            Edit transcript
-          </button>
+          {editing ? (
+            <>
+              {undoPayload && <button type="button" className="secondary" onClick={handleUndo} disabled={savingTranscript}>Undo last save</button>}
+              <button type="button" onClick={handleSave} disabled={savingTranscript}>
+                {savingTranscript ? 'Saving…' : 'Save transcript'}
+              </button>
+              <button type="button" className="secondary" onClick={handleCancel} disabled={savingTranscript}>
+                Cancel
+              </button>
+            </>
+          ) : (
+            <>
+              <button
+                className="secondary"
+                type="button"
+                onClick={beginEditing}
+                disabled={!hasTranscript || ['downloading', 'queued', 'processing'].includes(selected?.status)}
+              >
+                Edit transcript
+              </button>
+              {undoPayload && <button type="button" className="secondary" onClick={handleUndo} disabled={savingTranscript}>Undo last save</button>}
+            </>
+          )}
         </div>
       </div>
-      {editing && (
-        <div className="transcript-editor">
+      {editing ? (
+        <div id="generated-transcript-content" className="transcript-content transcript-editor">
+          {savingTranscript && <p className="muted" role="status">Saving transcript…</p>}
+          {!savingTranscript && <p className="muted" role="status">Changes save automatically.</p>}
           {draftLines.length ? draftLines.map((line, index) => (
             <label className="transcript-edit-line" key={`${line.start}-${index}`}>
               <span>{formatTranscriptTimestamp(line.start)} – {formatTranscriptTimestamp(line.end)}</span>
@@ -95,15 +178,8 @@ export default function TranscriptPanel({
               <textarea aria-label="Edit transcript text" value={draftText} onChange={event => setDraftText(event.target.value)} />
             </label>
           )}
-          <div className="transcript-edit-actions">
-            <button type="button" onClick={handleSave} disabled={savingTranscript}>
-              {savingTranscript ? 'Saving…' : 'Save transcript'}
-            </button>
-            <button type="button" className="secondary" onClick={() => setEditing(false)} disabled={savingTranscript}>Cancel</button>
-          </div>
         </div>
-      )}
-      {transcriptVisible ? (
+      ) : transcriptVisible ? (
         <div id="generated-transcript-content" className="transcript-content">
           {transcriptLines.length ? (
             <div className="transcript-lines">

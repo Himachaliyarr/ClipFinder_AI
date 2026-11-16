@@ -5,13 +5,14 @@ import fs from 'node:fs';
 import { nanoid } from 'nanoid';
 import mongoose from 'mongoose';
 import jwt from 'jsonwebtoken';
-import { Podcast, Clip, Activity, User } from '../models/index.js';
+import { Podcast, Clip, Activity, User, UploadSession } from '../models/index.js';
 import { auth, allow } from '../middleware/auth.js';
 import { enqueueYoutubeTranscription, enqueueTranscription, enqueueClipSelection, enqueueStorySelection, enqueueOpusClipProject, enqueueRender, mediaQueue, requestMediaJobCancellation } from '../queue.js';
 import { normalizeYouTubeUrl } from '../services/youtube.js';
 import { applySpeakerCorrections } from '../services/transcript.js';
 import { normalizeFolder, normalizeTags } from '../services/projectMetadata.js';
-import { MAX_UPLOAD_BYTES, MAX_UPLOAD_FILES } from '../config/limits.js';
+import { getExpectedChunkLength } from '../services/resumableUpload.js';
+import { MAX_UPLOAD_BYTES, MAX_UPLOAD_FILES, MAX_RESUMABLE_UPLOAD_BYTES, UPLOAD_CHUNK_BYTES } from '../config/limits.js';
 
 const r = Router();
 const root = path.resolve(process.env.MEDIA_ROOT || './server/storage');
@@ -19,6 +20,28 @@ fs.mkdirSync(root, { recursive: true });
 const wrap = fn => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
 const validId = id => mongoose.isValidObjectId(id);
 const escapeRegex = value => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+async function cleanupExpiredUploads() {
+  const expired = await UploadSession.find({ expiresAt: { $lte: new Date() } }).select('_id');
+  for (const session of expired) {
+    await fs.promises.rm(path.join(root, '.upload-sessions', `${session.id}.part`), { force: true });
+  }
+  if (expired.length) await UploadSession.deleteMany({ _id: { $in: expired.map(session => session._id) } });
+}
+const uploadCleanupTimer = setInterval(() => {
+  cleanupExpiredUploads().catch(error => console.error(JSON.stringify({
+    level: 'error',
+    operation: 'cleanup_expired_uploads',
+    message: error.message,
+  })));
+}, 60 * 60 * 1000);
+uploadCleanupTimer.unref();
+setTimeout(() => {
+  cleanupExpiredUploads().catch(error => console.error(JSON.stringify({
+    level: 'error',
+    operation: 'cleanup_expired_uploads',
+    message: error.message,
+  })));
+}, 30_000).unref();
 // Keep storage paths private; API responses expose metadata but not filesystem locations.
 const publicPodcast = doc => { const obj = doc.toObject ? doc.toObject() : doc; if (obj.sourceFiles) obj.sourceFiles = obj.sourceFiles.map(({ path: _path, ...f }) => f); delete obj.audioPath; return obj; };
 const publicClip = doc => { const obj = doc.toObject ? doc.toObject() : doc; delete obj.renderPath; return obj; };
@@ -32,7 +55,207 @@ const storage = multer.diskStorage({
 const upload = multer({ storage, limits: { fileSize: MAX_UPLOAD_BYTES, files: MAX_UPLOAD_FILES },
   fileFilter: (req, file, cb) => /^(audio|video)\//.test(file.mimetype) ? cb(null, true) : cb(Object.assign(new Error('Only audio and video files are allowed'), { status: 400 }))
 });
-r.get('/upload-limits', auth, (req, res) => res.json({ maxFiles: MAX_UPLOAD_FILES, maxFileBytes: MAX_UPLOAD_BYTES }));
+r.get('/upload-limits', auth, (req, res) => res.json({
+  maxFiles: MAX_UPLOAD_FILES,
+  maxFileBytes: MAX_UPLOAD_BYTES,
+  maxResumableFileBytes: MAX_RESUMABLE_UPLOAD_BYTES,
+  chunkBytes: UPLOAD_CHUNK_BYTES,
+}));
+r.post('/:id/uploads', auth, allow('admin','editor'), wrap(async (req, res) => {
+  if (!validId(req.params.id)) return res.status(400).json({ error: 'Invalid podcast id' });
+  const podcast = await Podcast.findById(req.params.id).select('_id sourceFiles');
+  if (!podcast) return res.status(404).json({ error: 'Podcast not found' });
+  const originalName = typeof req.body?.name === 'string' ? path.basename(req.body.name).slice(0, 240) : '';
+  const size = Number(req.body?.size);
+  const mimeType = String(req.body?.mimeType || '');
+  const kind = req.body?.kind;
+  const speaker = String(req.body?.speaker || '').trim().slice(0, 80);
+  if (!originalName || !Number.isSafeInteger(size) || size <= 0 || size > MAX_RESUMABLE_UPLOAD_BYTES) {
+    return res.status(400).json({ error: `File name and a file size between 1 byte and ${MAX_RESUMABLE_UPLOAD_BYTES} bytes are required` });
+  }
+  if (!/^(audio|video)\//i.test(mimeType)) return res.status(400).json({ error: 'Only audio and video files are allowed' });
+  if (!['video','audio','mix'].includes(kind)) return res.status(400).json({ error: 'Select a valid source type' });
+  if (podcast.sourceFiles.some(file => file.originalName === originalName && file.size === size && file.kind === kind && (file.speaker || '') === speaker)) {
+    return res.json({ complete: true, size, chunkBytes: UPLOAD_CHUNK_BYTES });
+  }
+
+  let session = await UploadSession.findOne({
+    podcast: podcast._id,
+    user: req.user.id,
+    originalName,
+    size,
+    mimeType,
+    kind,
+    speaker,
+    expiresAt: { $gt: new Date() },
+  }).sort({ updatedAt: -1 });
+  if (!session) {
+    session = await UploadSession.create({
+      podcast: podcast._id,
+      user: req.user.id,
+      originalName,
+      size,
+      mimeType,
+      kind,
+      speaker,
+      expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+    });
+  }
+  res.status(201).json({ uploadId: String(session._id), offset: session.offset, size: session.size, chunkBytes: UPLOAD_CHUNK_BYTES });
+}));
+r.get('/:id/uploads', auth, allow('admin','editor'), wrap(async (req, res) => {
+  if (!validId(req.params.id)) return res.status(400).json({ error: 'Invalid podcast id' });
+  const sessions = await UploadSession.find({
+    podcast: req.params.id,
+    user: req.user.id,
+    $expr: { $lt: ['$offset', '$size'] },
+    expiresAt: { $gt: new Date() },
+  }).select('originalName size mimeType kind speaker offset expiresAt').lean();
+  res.json(sessions.map(session => ({ ...session, uploadId: String(session._id) })));
+}));
+r.get('/:id/uploads/:uploadId', auth, allow('admin','editor'), wrap(async (req, res) => {
+  if (!validId(req.params.id) || !validId(req.params.uploadId)) return res.status(400).json({ error: 'Invalid upload session id' });
+  const session = await UploadSession.findOne({ _id: req.params.uploadId, podcast: req.params.id, user: req.user.id });
+  if (!session) return res.status(404).json({ error: 'Upload session not found or expired' });
+  res.json({ uploadId: String(session._id), offset: session.offset, size: session.size, chunkBytes: UPLOAD_CHUNK_BYTES });
+}));
+r.patch('/:id/uploads/:uploadId', auth, allow('admin','editor'), wrap(async (req, res, next) => {
+  if (!validId(req.params.id) || !validId(req.params.uploadId)) return res.status(400).json({ error: 'Invalid upload session id' });
+  const now = new Date();
+  const session = await UploadSession.findOneAndUpdate({
+    _id: req.params.uploadId,
+    podcast: req.params.id,
+    user: req.user.id,
+    expiresAt: { $gt: now },
+    $or: [{ lockUntil: null }, { lockUntil: { $lt: now } }],
+  }, { $set: { lockUntil: new Date(now.getTime() + 10 * 60_000) } }, { new: true });
+  if (!session) return res.status(409).json({ error: 'Upload session is busy, missing, or expired. Refresh its offset and retry.' });
+
+  let committed = false;
+  const partialPath = path.join(root, '.upload-sessions', `${session.id}.part`);
+  try {
+    const offset = Number(req.headers['upload-offset']);
+    const rawContentLength = req.headers['content-length'];
+    const contentLength = Number(rawContentLength);
+    if (offset !== session.offset) return res.status(409).json({ error: `Upload offset mismatch; expected ${session.offset}` });
+    if (session.offset >= session.size) return res.status(409).json({ error: 'All file bytes are already uploaded; complete the session' });
+    const expectedLength = getExpectedChunkLength(session.size, session.offset, UPLOAD_CHUNK_BYTES);
+    if (rawContentLength !== undefined && (!Number.isSafeInteger(contentLength) || contentLength !== expectedLength)) {
+      return res.status(400).json({ error: `Chunk must contain exactly ${expectedLength} bytes` });
+    }
+
+    const chunks = [];
+    let received = 0;
+    for await (const chunk of req) {
+      received += chunk.length;
+      if (received > UPLOAD_CHUNK_BYTES) return res.status(413).json({ error: 'Upload chunk exceeds the configured chunk size' });
+      chunks.push(chunk);
+    }
+    if (received !== expectedLength) return res.status(400).json({ error: 'Upload chunk ended before all expected bytes arrived' });
+
+    await fs.promises.mkdir(path.dirname(partialPath), { recursive: true });
+    try {
+      const current = await fs.promises.stat(partialPath);
+      if (current.size < session.offset) return res.status(409).json({ error: 'Stored upload is shorter than its saved offset; restart the upload' });
+      if (current.size !== session.offset) await fs.promises.truncate(partialPath, session.offset);
+    } catch (error) {
+      if (error.code !== 'ENOENT' || session.offset !== 0) throw error;
+    }
+    await fs.promises.appendFile(partialPath, Buffer.concat(chunks, received));
+    const nextOffset = session.offset + received;
+    const updated = await UploadSession.updateOne(
+      { _id: session._id, offset: session.offset, lockUntil: session.lockUntil },
+      { $set: { offset: nextOffset, lockUntil: null } }
+    );
+    if (!updated.matchedCount) return res.status(409).json({ error: 'Upload session changed while saving this chunk; refresh its offset' });
+    committed = true;
+    res.json({ uploadId: String(session._id), offset: nextOffset, size: session.size });
+  } catch (error) {
+    next(error);
+  } finally {
+    if (!committed) {
+      await UploadSession.updateOne({ _id: session._id, lockUntil: session.lockUntil }, { $set: { lockUntil: null } }).catch(() => {});
+    }
+  }
+}));
+r.post('/:id/uploads/:uploadId/complete', auth, allow('admin','editor'), wrap(async (req, res) => {
+  if (!validId(req.params.id) || !validId(req.params.uploadId)) return res.status(400).json({ error: 'Invalid upload session id' });
+  const now = new Date();
+  const session = await UploadSession.findOneAndUpdate({
+    _id: req.params.uploadId,
+    podcast: req.params.id,
+    user: req.user.id,
+    expiresAt: { $gt: now },
+    $or: [{ lockUntil: null }, { lockUntil: { $lt: now } }],
+  }, { $set: { lockUntil: new Date(now.getTime() + 10 * 60_000) } }, { new: true });
+  if (!session) return res.status(409).json({ error: 'Upload session is busy, missing, or expired' });
+  if (session.offset !== session.size) {
+    await UploadSession.updateOne({ _id: session._id }, { $set: { lockUntil: null } });
+    return res.status(409).json({ error: `Upload is incomplete; ${session.size - session.offset} bytes remain` });
+  }
+  const partialPath = path.join(root, '.upload-sessions', `${session.id}.part`);
+  const safeName = session.originalName.replace(/[^\w.-]/g, '_').slice(-180) || 'media';
+  const targetDir = path.join(root, String(session.podcast));
+  const targetPath = path.join(targetDir, `${session.id}-${safeName}`);
+  await fs.promises.mkdir(targetDir, { recursive: true });
+  let committed = false;
+  let moved = false;
+  try {
+    const podcast = await Podcast.findById(session.podcast);
+    if (!podcast) throw new Error('Podcast not found');
+    if (!podcast.sourceFiles.some(file => file.path === targetPath)) {
+      let stat;
+      let partialExists = true;
+      try {
+        stat = await fs.promises.stat(partialPath);
+      } catch (error) {
+        if (error.code !== 'ENOENT') throw error;
+        partialExists = false;
+        stat = await fs.promises.stat(targetPath);
+      }
+      if (stat.size !== session.size) throw new Error('Stored upload size does not match the completed session');
+      if (partialExists) {
+        await fs.promises.rename(partialPath, targetPath);
+        moved = true;
+      }
+      podcast.sourceFiles.push({
+        path: targetPath,
+        kind: session.kind,
+        speaker: session.speaker,
+        originalName: session.originalName,
+        size: session.size,
+      });
+      await podcast.save();
+    }
+    committed = true;
+    await UploadSession.deleteOne({ _id: session._id });
+    try {
+      await Activity.create({
+        user: req.user.id,
+        action: 'source_files_uploaded',
+        entityType: 'Podcast',
+        entityId: podcast._id,
+        details: { count: 1, kind: session.kind, speaker: session.speaker, resumable: true },
+      });
+    } catch (error) {
+      console.error(JSON.stringify({ level: 'error', operation: 'record_resumable_upload', podcastId: podcast.id, message: error.message }));
+    }
+    res.json(publicPodcast(podcast));
+  } catch (error) {
+    if (!committed) {
+      if (moved) await fs.promises.rename(targetPath, partialPath).catch(() => {});
+      await UploadSession.updateOne({ _id: session._id }, { $set: { lockUntil: null } });
+    }
+    throw error;
+  }
+}));
+r.delete('/:id/uploads/:uploadId', auth, allow('admin','editor'), wrap(async (req, res) => {
+  if (!validId(req.params.id) || !validId(req.params.uploadId)) return res.status(400).json({ error: 'Invalid upload session id' });
+  const session = await UploadSession.findOneAndDelete({ _id: req.params.uploadId, podcast: req.params.id, user: req.user.id });
+  if (!session) return res.status(404).json({ error: 'Upload session not found' });
+  await fs.promises.rm(path.join(root, '.upload-sessions', `${session.id}.part`), { force: true });
+  res.json({ message: 'Incomplete upload discarded' });
+}));
 r.get('/', auth, wrap(async (req, res) => {
   const filter = {};
   if (typeof req.query.folder === 'string') filter.folder = req.query.folder;
@@ -101,7 +324,7 @@ r.post('/:id/files', auth, allow('admin','editor'), wrap(async (req, res, next) 
       if (!req.files?.length) return res.status(400).json({ error: 'Select at least one audio or video file' });
       const kind = ['video','audio','mix'].includes(req.body.kind) ? req.body.kind : 'video';
       const speaker = String(req.body.speaker || '').trim().slice(0, 80);
-      p.sourceFiles.push(...req.files.map(f => ({ path: f.path, kind, speaker, originalName: f.originalname })));
+      p.sourceFiles.push(...req.files.map(f => ({ path: f.path, kind, speaker, originalName: f.originalname, size: f.size })));
       await p.save();
       await Activity.create({ user: req.user.id, action: 'source_files_uploaded', entityType: 'Podcast', entityId: p._id, details: { count: req.files.length, kind, speaker } });
       res.json(publicPodcast(p));
@@ -313,6 +536,59 @@ r.get('/analytics/summary', auth, wrap(async (req, res) => {
     averageWatchTime: Math.round(metrics.averageWatchTime || 0)
   });
 }));
+r.get('/analytics/backup-status', auth, allow('admin'), wrap(async (req, res) => {
+  const statusPath = path.resolve(process.env.BACKUP_ROOT || './backups', 'backup-status.json');
+  let status;
+  try {
+    status = JSON.parse(await fs.promises.readFile(statusPath, 'utf8'));
+  } catch (error) {
+    if (error.code === 'ENOENT') return res.json({ status: 'never_run', lastVerification: null });
+    throw error;
+  }
+  res.json({
+    status: status.status || 'unknown',
+    createdAt: status.createdAt || null,
+    failedAt: status.failedAt || null,
+    backupFolder: status.backupFolder || null,
+    databaseArchiveBytes: status.databaseArchiveBytes || null,
+    mediaIncluded: Boolean(status.mediaIncluded),
+    error: status.error || null,
+    lastVerification: status.lastVerification || null,
+    lastRestoreTest: status.lastRestoreTest || null,
+  });
+}));
+r.post('/analytics/backup-restore-test', auth, allow('admin'), wrap(async (req, res) => {
+  const backupFolder = typeof req.body?.backupFolder === 'string' ? req.body.backupFolder : '';
+  const notes = typeof req.body?.notes === 'string' ? req.body.notes.trim().slice(0, 500) : '';
+  if (req.body?.confirmed !== true || !backupFolder || !notes) {
+    return res.status(400).json({ error: 'Confirm a completed restore drill and provide its backup folder and notes' });
+  }
+  const statusPath = path.resolve(process.env.BACKUP_ROOT || './backups', 'backup-status.json');
+  let status;
+  try {
+    status = JSON.parse(await fs.promises.readFile(statusPath, 'utf8'));
+  } catch (error) {
+    if (error.code === 'ENOENT') return res.status(404).json({ error: 'No backup status has been recorded' });
+    throw error;
+  }
+  if (status.backupFolder !== backupFolder) return res.status(409).json({ error: 'The selected backup is not the latest completed backup' });
+  status.lastRestoreTest = { testedAt: new Date().toISOString(), backupFolder, notes, testedBy: String(req.user.id) };
+  const temporaryPath = `${statusPath}.${process.pid}.tmp`;
+  await fs.promises.writeFile(temporaryPath, JSON.stringify(status, null, 2), 'utf8');
+  await fs.promises.rm(statusPath, { force: true });
+  await fs.promises.rename(temporaryPath, statusPath);
+  try {
+    await Activity.create({
+      user: req.user.id,
+      action: 'backup_restore_test_recorded',
+      entityType: 'Backup',
+      details: { backupFolder, notes },
+    });
+  } catch (error) {
+    console.error(JSON.stringify({ level: 'error', operation: 'record_restore_test_activity', message: error.message }));
+  }
+  res.json({ message: 'Restore drill recorded', lastRestoreTest: status.lastRestoreTest });
+}));
 r.get('/analytics/learning-examples', auth, wrap(async (req, res) => {
   const examples = await Clip.find({ status: { $in: ['approved', 'rendered', 'published'] }, 'performance.views': { $gt: 0 } })
     .sort({ 'performance.views': -1, updatedAt: -1 })
@@ -370,7 +646,17 @@ r.get('/notifications', auth, wrap(async (req, res) => {
     clip_rendered: 'Clip render ready',
     background_job_failed: 'Background job failed',
   };
-  res.json(events.map(event => {
+  const failedJobTitles = {
+    'transcribe-podcast': 'Transcription failed',
+    'transcribe-youtube': 'YouTube transcription failed',
+    'import-youtube': 'YouTube import failed',
+    'select-clips': 'Clip suggestions failed',
+    'select-stories': 'Story moments failed',
+    'render-clip': 'Clip render failed',
+    'opusclip-generate': 'Reel generation failed',
+  };
+  const retryableJobs = new Set(['transcribe-podcast', 'transcribe-youtube', 'import-youtube', 'select-clips', 'select-stories', 'render-clip', 'opusclip-generate']);
+  const notifications = events.map(event => {
     const clip = event.entityType === 'Clip' ? clipDetails.get(String(event.entityId)) : null;
     const podcastTitle = event.entityType === 'Podcast'
       ? podcastTitles.get(String(event.entityId))
@@ -379,13 +665,110 @@ r.get('/notifications', auth, wrap(async (req, res) => {
     const target = podcastTitle || clip?.title || 'Project';
     return {
       id: String(event._id),
-      title: titles[event.action] || 'Background job update',
+      title: event.action === 'background_job_failed'
+        ? failedJobTitles[details.jobName] || titles.background_job_failed
+        : titles[event.action] || 'Background job update',
       message: details.message
         ? (details.message.startsWith(`${target}:`) ? details.message : `${target}: ${details.message}`)
         : `${target}${clip?.title && podcastTitle ? ` · ${clip.title}` : ''}`,
       createdAt: event.createdAt,
+      jobName: details.jobName || null,
+      retryable: event.action === 'background_job_failed' && retryableJobs.has(details.jobName),
     };
-  }));
+  });
+  if (req.user.role === 'admin') {
+    const statusPath = path.resolve(process.env.BACKUP_ROOT || './backups', 'backup-status.json');
+    try {
+      const backupStatus = JSON.parse(await fs.promises.readFile(statusPath, 'utf8'));
+      notifications.push(...(backupStatus.history || []).filter(event => new Date(event.createdAt) > sinceValue).map(event => ({
+        id: event.id,
+        title: event.status === 'success' ? 'Backup completed' : 'Backup failed',
+        message: event.status === 'success'
+          ? 'Scheduled backup finished successfully.'
+          : `Scheduled backup failed: ${event.error || 'Check backup process logs.'}`,
+        createdAt: event.createdAt,
+        retryable: false,
+      })));
+    } catch (error) {
+      if (error.code !== 'ENOENT') throw error;
+    }
+  }
+  res.json(notifications.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt)).slice(0, 50));
+}));
+r.post('/notifications/:activityId/retry', auth, allow('admin','editor'), wrap(async (req, res) => {
+  if (!validId(req.params.activityId)) return res.status(400).json({ error: 'Invalid notification id' });
+  const event = await Activity.findOne({ _id: req.params.activityId, action: 'background_job_failed' }).lean();
+  if (!event) return res.status(404).json({ error: 'Failed job notification not found' });
+  const jobName = event.details?.jobName;
+  const retryableJobs = new Set(['transcribe-podcast', 'transcribe-youtube', 'import-youtube', 'select-clips', 'select-stories', 'render-clip', 'opusclip-generate']);
+  if (!retryableJobs.has(jobName)) return res.status(400).json({ error: 'This job type cannot be retried from notifications' });
+
+  let job;
+  if (jobName === 'render-clip') {
+    const clip = await Clip.findById(event.entityId);
+    if (!clip || clip.renderStatus !== 'failed') return res.status(409).json({ error: 'Clip is no longer in a retryable state' });
+    const podcast = await Podcast.findById(clip.podcast);
+    if (!podcast) return res.status(404).json({ error: 'Podcast not found' });
+    job = await enqueueRender(clip.id, req.user.id, clip.renderSettings || {});
+    clip.renderJobId = job.id;
+    clip.renderStatus = 'queued';
+    clip.renderProgress = 0;
+    clip.renderError = undefined;
+    await clip.save();
+  } else {
+    const podcast = await Podcast.findById(event.entityId);
+    if (!podcast) return res.status(404).json({ error: 'Podcast not found' });
+    if (jobName === 'select-stories') {
+      if (podcast.storyMomentsStatus !== 'failed' || !podcast.transcript || !podcast.duration) {
+        return res.status(409).json({ error: 'Story selection is no longer in a retryable state' });
+      }
+      job = await enqueueStorySelection(podcast.id, req.user.id);
+      podcast.storyMomentsStatus = 'queued';
+      podcast.storyMomentsMessage = 'Story selection queued for retry';
+      podcast.storyMomentsError = undefined;
+    } else if (jobName === 'select-clips') {
+      if (podcast.status !== 'transcribed' || podcast.jobType !== 'select-clips' || Number(podcast.jobProgress) >= 100) {
+        return res.status(409).json({ error: 'Clip selection is no longer in a retryable state' });
+      }
+      job = await enqueueClipSelection(podcast.id, req.user.id);
+      podcast.status = 'processing';
+      podcast.jobProgress = 0;
+      podcast.jobMessage = 'Retrying clip selection';
+      podcast.error = undefined;
+    } else if (jobName === 'transcribe-podcast') {
+      if (podcast.status !== 'failed' || !podcast.sourceFiles?.length) return res.status(409).json({ error: 'Transcription is no longer in a retryable state' });
+      job = await enqueueTranscription(podcast.id, req.user.id);
+      podcast.status = 'queued';
+      podcast.error = undefined;
+    } else if (jobName === 'transcribe-youtube' || jobName === 'import-youtube') {
+      if (podcast.status !== 'failed' || !podcast.sourceUrl) return res.status(409).json({ error: 'YouTube import is no longer in a retryable state' });
+      job = await enqueueYoutubeTranscription(podcast.id, req.user.id, podcast.sourceUrl);
+      podcast.status = 'queued';
+      podcast.error = undefined;
+    } else {
+      if (podcast.opusClipStatus !== 'failed' || !podcast.transcript || !podcast.sourceUrl && !podcast.sourceFiles?.some(file => file.kind === 'video' && file.path)) {
+        return res.status(409).json({ error: 'Reel generation is no longer in a retryable state' });
+      }
+      job = await enqueueOpusClipProject(podcast.id, req.user.id);
+      podcast.opusClipStatus = 'queued';
+      podcast.opusClipMessage = 'Reel generation queued for retry';
+      podcast.opusClipError = undefined;
+    }
+    if (['transcribe-podcast', 'transcribe-youtube', 'import-youtube', 'select-clips'].includes(jobName)) {
+      podcast.jobId = job.id;
+      podcast.jobType = job.name;
+      podcast.jobProgress = 0;
+    }
+    await podcast.save();
+  }
+  await Activity.create({
+    user: req.user.id,
+    action: 'background_job_retried',
+    entityType: event.entityType,
+    entityId: event.entityId,
+    details: { jobName, jobId: job.id },
+  });
+  res.status(202).json({ message: 'Job retry queued', jobId: job.id, jobName });
 }));
 r.patch('/:id', auth, allow('admin','editor'), wrap(async (req, res) => {
   if (!validId(req.params.id)) return res.status(400).json({ error: 'Invalid podcast id' });
@@ -508,6 +891,15 @@ r.delete('/:id', auth, allow('admin','editor'), wrap(async (req, res) => {
   if (podcastJobActive || storyJobActive || reelJobActive || renderJobActive) {
     return res.status(409).json({ error: 'This podcast is still processing. Wait for its jobs to finish before deleting it.' });
   }
+
+  const uploadSessions = await UploadSession.find({ podcast: podcast._id }).select('_id lockUntil');
+  if (uploadSessions.some(session => session.lockUntil && session.lockUntil > new Date())) {
+    return res.status(409).json({ error: 'A source upload is still active. Wait for it to finish before deleting this podcast.' });
+  }
+  for (const session of uploadSessions) {
+    await fs.promises.rm(path.join(root, '.upload-sessions', `${session.id}.part`), { force: true });
+  }
+  await UploadSession.deleteMany({ podcast: podcast._id });
 
   const podcastDir = path.resolve(root, podcast.id);
   const rootPrefix = root.endsWith(path.sep) ? root : `${root}${path.sep}`;

@@ -65,11 +65,13 @@ export default function App() {
   const [metrics, setMetrics] = useState(null);
   const [users, setUsers] = useState([]);
   const [activity, setActivity] = useState([]);
+  const [backupStatus, setBackupStatus] = useState(null);
   const [newUser, setNewUser] = useState({ name: '', email: '', password: '', role: 'editor' });
   const [editingUser, setEditingUser] = useState(null);
   const [title, setTitle] = useState('');
   const [files, setFiles] = useState([]);
   const [uploadLimits, setUploadLimits] = useState(null);
+  const [uploadProgress, setUploadProgress] = useState(null);
   const [youtubeUrl, setYoutubeUrl] = useState('');
   const [extraFiles, setExtraFiles] = useState([]);
   const [sourceKind, setSourceKind] = useState('video');
@@ -80,6 +82,7 @@ export default function App() {
   const [assignees, setAssignees] = useState([]);
   const [previewSource, setPreviewSource] = useState(null);
   const [notifications, setNotifications] = useState([]);
+  const [retryingNotificationIds, setRetryingNotificationIds] = useState(() => new Set());
   const notificationCursor = useRef(new Date(Date.now() - 60_000).toISOString());
   const seenNotificationIds = useRef(new Set());
   const [metricsLoading, setMetricsLoading] = useState(Boolean(localStorage.getItem('cf_token')));
@@ -284,6 +287,48 @@ export default function App() {
       setActivity(activityResult.data);
     } catch (e) {
       setError(e.response?.data?.error || 'Could not load team and audit log');
+      return;
+    }
+    try {
+      setBackupStatus((await api.get('/podcasts/analytics/backup-status')).data);
+    } catch (e) {
+      setError(e.response?.data?.error || 'Could not load backup status');
+    }
+  }
+
+  async function recordRestoreTest(backupFolder) {
+    const notes = window.prompt('Only continue after a successful restore drill. Record the test database or validation notes:');
+    if (!notes?.trim()) return;
+    try {
+      const { data } = await api.post('/podcasts/analytics/backup-restore-test', {
+        confirmed: true,
+        backupFolder,
+        notes: notes.trim(),
+      });
+      setBackupStatus(current => ({ ...current, lastRestoreTest: data.lastRestoreTest }));
+      setError(data.message || 'Restore drill recorded.');
+    } catch (e) {
+      setError(e.response?.data?.error || 'Could not record restore drill');
+    }
+  }
+
+  async function retryNotification(notificationId) {
+    setRetryingNotificationIds(current => new Set(current).add(notificationId));
+    try {
+      const { data } = await api.post(`/podcasts/notifications/${notificationId}/retry`);
+      setNotifications(current => current.map(notification => notification.id === notificationId
+        ? { ...notification, retryable: false, message: `${notification.message} · Retry queued` }
+        : notification));
+      setError(data.message || 'Job retry queued.');
+      await refresh();
+    } catch (e) {
+      setError(e.response?.data?.error || 'Could not retry this job');
+    } finally {
+      setRetryingNotificationIds(current => {
+        const next = new Set(current);
+        next.delete(notificationId);
+        return next;
+      });
     }
   }
 
@@ -354,8 +399,9 @@ export default function App() {
       return;
     }
     setBusy(true);
+    setUploadProgress(null);
+    let podcast;
     try {
-      let podcast;
       if (youtubeUrl.trim()) {
         const result = (await api.post('/podcasts/youtube', {
           title,
@@ -371,11 +417,7 @@ export default function App() {
           folder: projectFolder,
           tags: projectTags.split(',').map(tag => tag.trim()).filter(Boolean),
         })).data;
-        const formData = new FormData();
-        [...files].forEach(file => formData.append('files', file));
-        formData.append('kind', sourceKind);
-        formData.append('speaker', speakerKey);
-        await api.post(`/podcasts/${podcast._id}/files`, formData);
+        await uploadResumableFiles(podcast._id, files, sourceKind, speakerKey);
       }
 
       setTitle('');
@@ -383,13 +425,73 @@ export default function App() {
       setProjectTags('');
       setFiles([]);
       setYoutubeUrl('');
+      setUploadProgress(null);
       await load();
       setSelected(podcast);
       setPage('detail');
     } catch (e) {
-      setError(e.response?.data?.error || e.message);
+      setUploadProgress(null);
+      if (podcast && !youtubeUrl.trim()) {
+        await load();
+        setError(`${e.response?.data?.error || e.message}. Project was created; open it and reselect the same file to resume.`);
+      } else {
+        setError(e.response?.data?.error || e.message);
+      }
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function uploadResumableFiles(podcastId, selectedFiles, kind, speaker) {
+    const uploads = [...selectedFiles];
+    const totalBytes = uploads.reduce((total, file) => total + file.size, 0);
+    let completedBytes = 0;
+    for (const file of uploads) {
+      const { data: session } = await api.post(`/podcasts/${podcastId}/uploads`, {
+        name: file.name,
+        size: file.size,
+        mimeType: file.type || (kind === 'video' ? 'video/mp4' : 'audio/mpeg'),
+        kind,
+        speaker,
+      });
+      if (session.complete) {
+        completedBytes += file.size;
+        setUploadProgress({ fileName: file.name, loaded: completedBytes, total: totalBytes });
+        continue;
+      }
+      let offset = session.offset;
+      setUploadProgress({ fileName: file.name, loaded: completedBytes + offset, total: totalBytes });
+      while (offset < file.size) {
+        const end = Math.min(file.size, offset + session.chunkBytes);
+        const chunk = file.slice(offset, end);
+        let chunkSaved = false;
+        let lastError;
+        for (let attempt = 0; attempt < 6 && !chunkSaved; attempt += 1) {
+          try {
+            const result = await api.patch(
+              `/podcasts/${podcastId}/uploads/${session.uploadId}`,
+              chunk,
+              { headers: { 'Content-Type': 'application/octet-stream', 'Upload-Offset': String(offset) } }
+            );
+            offset = result.data.offset;
+            chunkSaved = true;
+          } catch (error) {
+            lastError = error;
+            if (error.response && error.response.status !== 409 && error.response.status < 500) throw error;
+            const status = await api.get(`/podcasts/${podcastId}/uploads/${session.uploadId}`);
+            if (status.data.offset > offset) {
+              offset = status.data.offset;
+              chunkSaved = true;
+            } else if (attempt < 5) {
+              await new Promise(resolve => setTimeout(resolve, 750 * (attempt + 1)));
+            }
+          }
+        }
+        if (!chunkSaved) throw lastError || new Error('Upload chunk could not be saved');
+        setUploadProgress({ fileName: file.name, loaded: completedBytes + offset, total: totalBytes });
+      }
+      await api.post(`/podcasts/${podcastId}/uploads/${session.uploadId}/complete`);
+      completedBytes += file.size;
     }
   }
 
@@ -418,16 +520,15 @@ export default function App() {
       return;
     }
     setBusy(true);
+    setUploadProgress(null);
     try {
-      const formData = new FormData();
-      [...extraFiles].forEach(file => formData.append('files', file));
-      formData.append('kind', sourceKind);
-      formData.append('speaker', speakerKey);
-      await api.post(`/podcasts/${selected._id}/files`, formData);
+      await uploadResumableFiles(selected._id, extraFiles, sourceKind, speakerKey);
       setExtraFiles([]);
       await refresh();
+      setUploadProgress(null);
       setError('Source tracks uploaded. Use the speaker key in Camera plan.');
     } catch (e) {
+      setUploadProgress(null);
       setError(e.response?.data?.error || e.message);
     } finally {
       setBusy(false);
@@ -439,9 +540,10 @@ export default function App() {
     if (selectedFiles.length > uploadLimits.maxFiles) {
       return `Select no more than ${uploadLimits.maxFiles} files at a time.`;
     }
-    const oversizedFile = [...selectedFiles].find(file => file.size > uploadLimits.maxFileBytes);
+    const maxFileBytes = uploadLimits.maxResumableFileBytes || uploadLimits.maxFileBytes;
+    const oversizedFile = [...selectedFiles].find(file => file.size > maxFileBytes);
     return oversizedFile
-      ? `${oversizedFile.name} exceeds the ${Math.ceil(uploadLimits.maxFileBytes / 1024 ** 3)} GiB per-file limit.`
+      ? `${oversizedFile.name} exceeds the ${Math.ceil(maxFileBytes / 1024 ** 3)} GiB per-file limit.`
       : '';
   }
 
@@ -530,13 +632,13 @@ export default function App() {
     }
   }
 
-  async function saveTranscript(payload) {
+  async function saveTranscript(payload, { silent = false } = {}) {
     setSavingTranscript(true);
     try {
       const { data } = await api.patch(`/podcasts/${selected._id}/transcript`, payload);
       setSelected(data);
       setPodcasts(items => items.map(item => item._id === data._id ? { ...item, status: data.status, jobMessage: data.jobMessage } : item));
-      setError('Transcript saved. Regenerate clip suggestions to apply the edits.');
+      if (!silent) setError('Transcript saved. Regenerate clip suggestions to apply the edits.');
       return true;
     } catch (e) {
       setError(e.response?.data?.error || 'Could not save transcript');
@@ -760,6 +862,8 @@ export default function App() {
           onRefresh={page === 'team' ? loadTeam : page === 'dashboard' ? refreshDashboard : refresh}
           notifications={notifications}
           onClearNotifications={() => setNotifications([])}
+          onRetryNotification={retryNotification}
+          retryingNotificationIds={retryingNotificationIds}
         />
         {error && (
           <div className="notice" role="status" aria-live="polite">
@@ -771,8 +875,8 @@ export default function App() {
         )}
         {page === 'team' && currentUser?.role === 'admin' ? (
           <TeamPage
-            data={{ users, activity, newUser, editingUser, busy, currentUser }}
-            actions={{ setNewUser, createUser, setEditingUser, updateUser, startEditingUser }}
+            data={{ users, activity, backupStatus, newUser, editingUser, busy, currentUser }}
+            actions={{ setNewUser, createUser, setEditingUser, updateUser, startEditingUser, recordRestoreTest }}
           />
         ) : page === 'dashboard' ? (
           <DashboardPage
@@ -785,6 +889,7 @@ export default function App() {
               speakerKey,
               files,
               uploadLimits,
+              uploadProgress,
               busy,
               podcasts,
               filteredPodcasts,
@@ -842,6 +947,7 @@ export default function App() {
               assignees,
               savingTranscript,
               previewSource,
+              uploadProgress,
             }}
             actions={{
               setSourceKind,

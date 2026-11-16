@@ -1,0 +1,129 @@
+{
+  "planHash": "53ca041c52c75aacfba996df42885368f23b78bb70fa7b2c4644b06b9b99cf16",
+  "phase": "standalone",
+  "recordedAtUtc": "2026-11-16T10:26:28.3360164Z",
+  "retryCount": 3,
+  "resetBaseline": false,
+  "complete": true,
+  "result": {
+    "setupSucceeded": true,
+    "setupDurationMs": 0,
+    "setupFailureOutput": null,
+    "assertions": [
+      {
+        "name": "client-home-serves",
+        "kind": "http-probe",
+        "verificationMethod": "http-status",
+        "passed": true,
+        "timedOut": false,
+        "skipped": false,
+        "skippedReason": null,
+        "exitCode": null,
+        "outputSample": "HTTP 200\n\u003C!doctype html\u003E\u003Chtml\u003E\u003Chead\u003E\n  \u003Cscript type=\u0022module\u0022\u003Eimport { injectIntoGlobalHook } from \u0022/@react-refresh\u0022;\ninjectIntoGlobalHook(window);\nwindow.$RefreshReg$ = () =\u003E {};\nwindow.$RefreshSig$ = () =\u003E (type) =\u003E type;\u003C/script\u003E\n\n  \u003Cscript type=\u0022module\u0022 src=\u0022/@vite/client\u0022\u003E\u003C/script\u003E\n\u003Cmeta charset=\u0022UTF-8\u0022/\u003E\u003Cmeta name=\u0022viewport\u0022 content=\u0022width=device-width,initial-scale=1.0\u0022/\u003E\u003Ctitle\u003EClipFinder AI\u003C/title\u003E\u003C/head\u003E\u003Cbody\u003E\u003Cdiv id=\u0022root\u0022\u003E\u003C/div\u003E\u003Cscript type=\u0022module\u0022 src=\u0022/src/main.jsx?t=1794824442456\u0022\u003E\u003C/script\u003E\u003C/body\u003E\u003C/html\u003E\n",
+        "durationMs": 13
+      },
+      {
+        "name": "client-builds",
+        "kind": "process",
+        "verificationMethod": "exit-code",
+        "passed": true,
+        "timedOut": false,
+        "skipped": false,
+        "skippedReason": null,
+        "exitCode": 0,
+        "outputSample": "\r\n\u003E clipfinder-ai@1.0.0 build\r\n\u003E npm --workspace client run build\r\n\r\n\r\n\u003E clipfinder-client@1.0.0 build\r\n\u003E vite build\r\n\r\n\u001B[36mvite v6.4.6 \u001B[32mbuilding for production...\u001B[36m\u001B[39m\r\ntransforming...\r\n\u001B[32m\u2713\u001B[39m 1657 modules transformed.\r\nrendering chunks...\r\ncomputing gzip size...\r\n\u001B[2mdist/\u001B[22m\u001B[32mindex.html                 \u001B[39m\u001B[1m\u001B[2m  0.35 kB\u001B[22m\u001B[1m\u001B[22m\u001B[2m \u2502 gzip:   0.26 kB\u001B[22m\r\n\u001B[2mdist/\u001B[22m\u001B[35massets/index-dGobk2lw.css  \u001B[39m\u001B[1m\u001B[2m 39.75 kB\u001B[22m\u001B[1m\u001B[22m\u001B[2m \u2502 gzip:   8.84 kB\u001B[22m\r\n\u001B[2mdist/\u001B[22m\u001B[36massets/index-DFRA3Zf5.js   \u001B[39m\u001B[1m\u001B[2m484.71 kB\u001B[22m\u001B[1m\u001B[22m\u001B[2m \u2502 gzip: 150.29 kB\u001B[22m\r\n\u001B[32m\u2713 built in 3.33s\u001B[39m\r\n",
+        "durationMs": 4940
+      },
+      {
+        "name": "tests-pass",
+        "kind": "process",
+        "verificationMethod": "test-results",
+        "passed": true,
+        "timedOut": false,
+        "skipped": false,
+        "skippedReason": null,
+        "exitCode": 0,
+        "outputSample": "\r\n\u003E clipfinder-server@1.0.0 test\r\n\u003E node --test\r\n\r\n\u2714 selects clips using transcript source timestamps and normalizes numeric strings (4.3878ms)\r\n\u2714 reports malformed model output instead of silently returning no clips (1.3787ms)\r\n\u2714 reports model timestamps that are all outside the source duration (2.6924ms)\r\n\u2714 identifies network failures from the clip-selection provider (0.6643ms)\r\n\u2714 parses word timings and applies chunk offsets (2.6104ms)\r\n\u2714 drops malformed, empty, and out-of-range word timings (0.3185ms)\r\n\u2714 clamps a valid word at the end of the source audio (0.2302ms)\r\n\u2714 preserves Deepgram speaker labels on timed words (0.199ms)\r\n\u2714 matches changed Deepgram speaker ids across overlapping chunks (0.7316ms)\r\n\u2714 removes repeated transcript words from overlapping chunks (1.4087ms)\r\n\u2714 advances YouTube progress while FFmpeg is extracting a chunk (0.2709ms)\r\n\u2714 groups word timings into sentences and splits at speaker changes (0.9243ms)\r\n\u2714 parses Sarvam phrase timestamps with chunk offsets and duration bounds (0.3938ms)\r\n\u2714 transcribes each audio chunk with both Deepgram and Sarvam (38.7971ms)\r\n\u2714 Deepgram-only transcription does not require or call Sarvam (0.7298ms)\r\n\u2714 requires OpenAI timed moments to build OpusClip guidance (2.5997ms)\r\n\u2714 creates an OpusClip ClipAnything project directly from a YouTube source (36.927ms)\r\n\u2714 uploads a local video through OpusClip resumable upload before creating the project (16.3801ms)\r\n\u2714 retrieves exportable OpusClip reels and rejects untrusted media URLs (1.4402ms)\r\n\u2714 normalizes optional folders and rejects oversized folder names (2.2607ms)\r\n\u2714 trims and deduplicates tags without case-sensitive duplicates (1.5649ms)\r\n\u2714 maps supported social formats to even render dimensions (1.9186ms)\r\n\u2714 rejects unsupported render formats (0.5542ms)\r\n\u2714 caps upload chunks and sizes the final chunk to the remaining bytes (1.1988ms)\r\n\u2714 rejects invalid and already-complete upload offsets (0.703ms)\r\n\u2714 selects 25-30 timestamped stories through ChatGPT and normalizes response fields (4.7949ms)\r\n\u2714 rejects invalid timestamps and responses with fewer than 25 valid stories (0.8864ms)\r\n\u2714 reports ChatGPT configuration and provider errors (0.4774ms)\r\n\u2714 reports empty and malformed provider response bodies clearly (0.6068ms)\r\n\u2714 identifies network failures from ChatGPT separately from API responses (0.5281ms)\r\n\u2714 applies speaker corrections by segment start time and preserves text and timings (1.798ms)\r\n\u2714 accepts supported YouTube video URLs and rejects other hosts (0.9716ms)\r\n\u2714 resolves an audio stream URL without requesting a media download (0.1693ms)\r\n\u2139 tests 33\r\n\u2139 suites 0\r\n\u2139 pass 33\r\n\u2139 fail 0\r\n\u2139 cancelled 0\r\n\u2139 skipped 0\r\n\u2139 todo 0\r\n\u2139 duration_ms 233.8238\r\n",
+        "durationMs": 1016,
+        "testResults": {
+          "testFramework": "unknown",
+          "runnerDetectedFrom": "none",
+          "testsTotal": 0,
+          "testsPassed": 0,
+          "testsFailed": 0,
+          "testsSkipped": 0,
+          "parseFailed": true
+        }
+      },
+      {
+        "name": "client-transcript-tests",
+        "kind": "process",
+        "verificationMethod": "exit-code",
+        "passed": true,
+        "timedOut": false,
+        "skipped": false,
+        "skippedReason": null,
+        "exitCode": 0,
+        "outputSample": "\u2714 groups word timings by sentence and starts a new line when the speaker changes (1.9709ms)\r\n\u2714 keeps provider phrase timings as separate lines and skips invalid segments (0.1911ms)\r\n\u2714 exports transcript lines with timestamps and speaker labels (0.9674ms)\r\n\u2714 falls back to plain transcript text when timed segments are unavailable (0.109ms)\r\n\u2714 exports JSON with transcript metadata and normalized timed segments (0.2686ms)\r\n\u2714 exports timed subtitles in SRT and VTT formats (0.375ms)\r\n\u2714 exports clip metadata as escaped CSV (0.2575ms)\r\n\u2139 tests 7\r\n\u2139 suites 0\r\n\u2139 pass 7\r\n\u2139 fail 0\r\n\u2139 cancelled 0\r\n\u2139 skipped 0\r\n\u2139 todo 0\r\n\u2139 duration_ms 92.9306\r\n",
+        "durationMs": 175
+      }
+    ],
+    "executions": [
+      {
+        "source": "client-home-serves",
+        "resolvedExecutable": "C:\\Program Files\\nodejs\\npm.CMD",
+        "args": [
+          "--workspace",
+          "client",
+          "run",
+          "dev",
+          "--",
+          "--host",
+          "127.0.0.1",
+          "--port",
+          "5173",
+          "--strictPort"
+        ],
+        "cwd": "D:\\first live project details\\ClipFinder-AI\\clipfinder-ai",
+        "env": {},
+        "prependPath": [],
+        "platform": "win32"
+      },
+      {
+        "source": "client-builds",
+        "resolvedExecutable": "C:\\Program Files\\nodejs\\npm.CMD",
+        "args": [
+          "run",
+          "build"
+        ],
+        "cwd": "D:\\first live project details\\ClipFinder-AI\\clipfinder-ai",
+        "env": {},
+        "prependPath": [],
+        "platform": "win32"
+      },
+      {
+        "source": "tests-pass",
+        "resolvedExecutable": "C:\\Program Files\\nodejs\\npm.CMD",
+        "args": [
+          "test"
+        ],
+        "cwd": "D:\\first live project details\\ClipFinder-AI\\clipfinder-ai\\server",
+        "env": {},
+        "prependPath": [],
+        "platform": "win32"
+      },
+      {
+        "source": "client-transcript-tests",
+        "resolvedExecutable": "C:\\Program Files\\nodejs\\node.EXE",
+        "args": [
+          "--test",
+          "test/transcript.test.js"
+        ],
+        "cwd": "D:\\first live project details\\ClipFinder-AI\\clipfinder-ai\\client",
+        "env": {},
+        "prependPath": [],
+        "platform": "win32"
+      }
+    ]
+  }
+}

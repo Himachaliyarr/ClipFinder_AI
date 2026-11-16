@@ -33,7 +33,7 @@ test('selects 25-30 timestamped stories through ChatGPT and normalizes response 
     requestHeaders = options.headers;
     return {
       ok: true,
-      json: async () => ({
+      text: async () => JSON.stringify({
         choices: [{ message: { content: JSON.stringify({ stories: makeStories(32) }) } }],
       }),
     };
@@ -72,7 +72,7 @@ test('rejects invalid timestamps and responses with fewer than 25 valid stories'
   process.env.LLM_API_KEY = 'test-key';
   globalThis.fetch = async () => ({
     ok: true,
-    json: async () => ({
+    text: async () => JSON.stringify({
       choices: [{
         message: {
           content: JSON.stringify({
@@ -106,9 +106,26 @@ test('reports ChatGPT configuration and provider errors', async () => {
     globalThis.fetch = async () => ({
       ok: false,
       status: 401,
-      json: async () => ({ error: { message: 'Invalid API key' } }),
+      text: async () => JSON.stringify({ error: { message: 'Invalid API key' } }),
     });
     await assert.rejects(selectStories('Transcript text', 900), /ChatGPT story selection error \(401\): Invalid API key/);
+  } finally {
+    globalThis.fetch = previousFetch;
+    if (previousKey === undefined) delete process.env.LLM_API_KEY;
+    else process.env.LLM_API_KEY = previousKey;
+  }
+});
+
+test('reports empty and malformed provider response bodies clearly', async () => {
+  const previousKey = process.env.LLM_API_KEY;
+  const previousFetch = globalThis.fetch;
+  process.env.LLM_API_KEY = 'test-key';
+
+  try {
+    globalThis.fetch = async () => ({ ok: false, status: 502, text: async () => '' });
+    await assert.rejects(selectStories('Transcript text', 900), /HTTP 502 with an empty response/);
+    globalThis.fetch = async () => ({ ok: true, status: 200, text: async () => '{"choices":' });
+    await assert.rejects(selectStories('Transcript text', 900), /malformed JSON \(HTTP 200\)/);
   } finally {
     globalThis.fetch = previousFetch;
     if (previousKey === undefined) delete process.env.LLM_API_KEY;

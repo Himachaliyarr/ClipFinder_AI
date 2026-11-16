@@ -1,10 +1,52 @@
 // Team account management and audit history are rendered as a dedicated page.
 export default function TeamPage({ data, actions }) {
-  const { users, activity, newUser, editingUser, busy, currentUser } = data;
-  const { setNewUser, createUser, setEditingUser, updateUser, startEditingUser } = actions;
+  const { users, activity, backupStatus, newUser, editingUser, busy, currentUser } = data;
+  const { setNewUser, createUser, setEditingUser, updateUser, startEditingUser, recordRestoreTest } = actions;
+  const backupLabel = backupStatus?.status === 'success'
+    ? 'Last backup succeeded'
+    : backupStatus?.status === 'failed'
+      ? 'Last backup failed'
+      : 'No backup recorded yet';
 
   return (
     <>
+      <section className="create backup-health" aria-labelledby="backup-health-heading">
+        <div>
+          <h3 id="backup-health-heading">Backup health</h3>
+          <span className={`status ${backupStatus?.status === 'success' ? 'approved' : backupStatus?.status === 'failed' ? 'failed' : ''}`}>
+            {backupLabel}
+          </span>
+          {backupStatus?.createdAt && <p className="muted">Last completed: {new Date(backupStatus.createdAt).toLocaleString()}</p>}
+          {backupStatus?.failedAt && <p className="error">{backupStatus.error || 'Check the backup process logs for details.'}</p>}
+          {backupStatus?.status === 'success' && (
+            <p className="muted">
+              Database archive: {backupStatus.databaseArchiveBytes ? `${(backupStatus.databaseArchiveBytes / 1024 ** 2).toFixed(1)} MiB` : 'recorded'} ·
+              Media: {backupStatus.mediaIncluded ? 'included' : 'not found'}
+            </p>
+          )}
+          {backupStatus?.lastVerification && (
+            <p className={backupStatus.lastVerification.ok ? 'muted' : 'error'}>
+              Integrity check {backupStatus.lastVerification.ok ? 'passed' : 'failed'} · {new Date(backupStatus.lastVerification.checkedAt).toLocaleString()}
+              {backupStatus.lastVerification.error ? ` · ${backupStatus.lastVerification.error}` : ''}
+              {backupStatus.lastVerification.ok && ' · Restore itself was not tested'}
+            </p>
+          )}
+          {backupStatus?.lastRestoreTest && (
+            <p className="muted">
+              Restore drill recorded: {new Date(backupStatus.lastRestoreTest.testedAt).toLocaleString()} · {backupStatus.lastRestoreTest.backupFolder} · {backupStatus.lastRestoreTest.notes}
+            </p>
+          )}
+          {backupStatus?.status === 'success' && backupStatus.backupFolder && (
+            <button
+              type="button"
+              className="secondary"
+              onClick={() => recordRestoreTest(backupStatus.backupFolder)}
+            >
+              Record completed restore drill
+            </button>
+          )}
+        </div>
+      </section>
       <section className="create">
         <form className="userform" onSubmit={createUser}>
           <h3>Create team member</h3>

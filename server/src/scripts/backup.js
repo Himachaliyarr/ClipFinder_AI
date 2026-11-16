@@ -32,6 +32,37 @@ if (backupRelativeToMedia === '' || (!path.isAbsolute(backupRelativeToMedia)
   throw new Error('BACKUP_ROOT must not be inside MEDIA_ROOT');
 }
 
+function redactError(error) {
+  return String(error.message || 'Unknown backup error')
+    .replace(/mongodb(?:\+srv)?:\/\/[^@\s]+@/gi, 'mongodb://[redacted]@')
+    .slice(0, 500);
+}
+
+async function writeBackupStatus(update) {
+  await fs.mkdir(backupRoot, { recursive: true });
+  const statusPath = path.join(backupRoot, 'backup-status.json');
+  let previous = {};
+  try {
+    previous = JSON.parse(await fs.readFile(statusPath, 'utf8'));
+  } catch (error) {
+    if (error.code !== 'ENOENT' && !(error instanceof SyntaxError)) throw error;
+  }
+  const history = Array.isArray(previous.history) ? previous.history : [];
+  if (update.status === 'success' || update.status === 'failed') {
+    const eventTime = update.createdAt || update.failedAt || new Date().toISOString();
+    history.push({
+      id: `backup-${eventTime}`,
+      status: update.status,
+      createdAt: eventTime,
+      error: update.error || null,
+    });
+  }
+  const temporaryPath = `${statusPath}.${process.pid}.tmp`;
+  await fs.writeFile(temporaryPath, JSON.stringify({ ...previous, ...update, history: history.slice(-30) }, null, 2), 'utf8');
+  await fs.rm(statusPath, { force: true });
+  await fs.rename(temporaryPath, statusPath);
+}
+
 async function createBackup() {
   await fs.mkdir(backupRoot, { recursive: true });
   const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
@@ -40,17 +71,50 @@ async function createBackup() {
 
   try {
     await runMongoDump(uri, path.join(stagingDir, 'database.archive.gz'));
+    let mediaIncluded = false;
     try {
       await fs.access(mediaRoot);
-      await fs.cp(mediaRoot, path.join(stagingDir, 'media'), { recursive: true, errorOnExist: true });
+      const uploadTempRoot = path.join(mediaRoot, '.upload-sessions');
+      await fs.cp(mediaRoot, path.join(stagingDir, 'media'), {
+        recursive: true,
+        errorOnExist: true,
+        filter: source => {
+          const resolved = path.resolve(source);
+          return resolved !== uploadTempRoot && !resolved.startsWith(`${uploadTempRoot}${path.sep}`);
+        },
+      });
+      mediaIncluded = true;
     } catch (error) {
       if (error.code !== 'ENOENT') throw error;
       console.log(`Media directory not found; database-only backup created (${mediaRoot})`);
     }
+    const archive = await fs.stat(path.join(stagingDir, 'database.archive.gz'));
+    const createdAt = new Date().toISOString();
+    await fs.writeFile(path.join(stagingDir, 'backup-manifest.json'), JSON.stringify({
+      createdAt,
+      databaseArchive: 'database.archive.gz',
+      databaseArchiveBytes: archive.size,
+      mediaIncluded,
+    }, null, 2), 'utf8');
     await fs.rename(stagingDir, finalDir);
+    await writeBackupStatus({
+      status: 'success',
+      createdAt,
+      backupFolder: path.basename(finalDir),
+      databaseArchiveBytes: archive.size,
+      mediaIncluded,
+      failedAt: null,
+      error: null,
+    });
+    console.log(JSON.stringify({ level: 'info', operation: 'backup', status: 'success', createdAt, mediaIncluded }));
     console.log(`Backup created at ${finalDir}`);
   } catch (error) {
     await fs.rm(stagingDir, { recursive: true, force: true });
+    try {
+      await writeBackupStatus({ status: 'failed', failedAt: new Date().toISOString(), error: redactError(error) });
+    } catch (statusError) {
+      console.error(JSON.stringify({ level: 'error', operation: 'write_backup_status', message: redactError(statusError) }));
+    }
     throw error;
   }
 }
@@ -72,7 +136,7 @@ if (process.argv.includes('--schedule')) {
   const reportFailure = error => console.error(JSON.stringify({
     level: 'error',
     operation: 'scheduled_backup',
-    message: error.message,
+    message: redactError(error),
   }));
   await createBackup();
   while (true) {

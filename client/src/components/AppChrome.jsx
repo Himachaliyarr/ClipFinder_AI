@@ -1,3 +1,4 @@
+import { useEffect, useRef } from "react";
 import {
   Clapperboard,
   Bell,
@@ -140,7 +141,31 @@ export function WorkspaceHeader({
   onRefresh,
   notifications = [],
   onClearNotifications,
+  onRetryNotification,
+  retryingNotificationIds = new Set(),
 }) {
+  const notificationDetailsRef = useRef(null);
+
+  useEffect(() => {
+    const closeOnOutsideInteraction = event => {
+      const details = notificationDetailsRef.current;
+      if (details?.open && !details.contains(event.target)) details.open = false;
+    };
+    const closeOnEscape = event => {
+      if (event.key === "Escape" && notificationDetailsRef.current?.open) {
+        notificationDetailsRef.current.open = false;
+      }
+    };
+    document.addEventListener("focusin", closeOnOutsideInteraction);
+    document.addEventListener("pointerdown", closeOnOutsideInteraction);
+    document.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.removeEventListener("focusin", closeOnOutsideInteraction);
+      document.removeEventListener("pointerdown", closeOnOutsideInteraction);
+      document.removeEventListener("keydown", closeOnEscape);
+    };
+  }, []);
+
   return (
     <header>
       <div>
@@ -150,7 +175,7 @@ export function WorkspaceHeader({
       <div className="header-actions">
         <ThemeToggle theme={theme} onToggle={onToggleTheme} />
         <div className="notification-center">
-          <details>
+          <details ref={notificationDetailsRef}>
             <summary aria-label={`${notifications.length} notifications`}>
               <Bell size={16} />
               {notifications.length > 0 && <span className="notification-count">{notifications.length}</span>}
@@ -169,6 +194,16 @@ export function WorkspaceHeader({
                   <strong>{notification.title}</strong>
                   <p>{notification.message}</p>
                   <time dateTime={notification.createdAt}>{new Date(notification.createdAt).toLocaleString()}</time>
+                  {notification.retryable && (
+                    <button
+                      type="button"
+                      className="notification-retry"
+                      onClick={() => onRetryNotification(notification.id)}
+                      disabled={retryingNotificationIds.has(notification.id)}
+                    >
+                      {retryingNotificationIds.has(notification.id) ? 'Retrying…' : 'Retry job'}
+                    </button>
+                  )}
                 </article>
               )) : <p className="muted notification-empty">No notifications yet.</p>}
             </section>

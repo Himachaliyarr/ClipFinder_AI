@@ -25,6 +25,7 @@ export default function PodcastDetailPage({ data, actions }) {
     assignees,
     savingTranscript,
     previewSource,
+    uploadProgress,
   } = data;
   const {
     setSourceKind,
@@ -51,6 +52,13 @@ export default function PodcastDetailPage({ data, actions }) {
   } = actions;
   const [activeTab, setActiveTab] = useState('transcript');
   const [aspectRatio, setAspectRatio] = useState('9:16');
+  const [clipStatusFilter, setClipStatusFilter] = useState('all');
+  const [clipAssigneeFilter, setClipAssigneeFilter] = useState('all');
+  const filteredClips = clips.filter(clip => {
+    const assignedTo = clip.assignedTo?._id || clip.assignedTo?.id || clip.assignedTo || '';
+    return (clipStatusFilter === 'all' || clip.status === clipStatusFilter)
+      && (clipAssigneeFilter === 'all' || (clipAssigneeFilter === 'unassigned' ? !assignedTo : String(assignedTo) === clipAssigneeFilter));
+  });
   const tabs = [
     { id: 'transcript', label: 'Transcript' },
     { id: 'stories', label: `Story moments (${selected?.storyMoments?.length || 0})` },
@@ -126,6 +134,12 @@ export default function PodcastDetailPage({ data, actions }) {
         <button onClick={uploadMore} disabled={busy || !extraFiles.length || (!speakerKey && sourceKind !== 'mix')}>
           Upload track
         </button>
+        {uploadProgress && (
+          <div className="upload-transfer-progress" role="status" aria-live="polite">
+            <span>Uploading {uploadProgress.fileName} · {Math.floor(uploadProgress.loaded / 1024 ** 2)} / {Math.ceil(uploadProgress.total / 1024 ** 2)} MiB</span>
+            <progress max={uploadProgress.total} value={uploadProgress.loaded} />
+          </div>
+        )}
       </section>
       {selected?.error && !isPodcastJobActive(selected.status) && <div className="notice error">Processing failed: {selected.error}</div>}
       <div className="detail-tabs" role="tablist" aria-label="Podcast details" onKeyDown={handleTabKeyDown}>
@@ -211,8 +225,29 @@ export default function PodcastDetailPage({ data, actions }) {
       </div>
       <div id="detail-panel-clips" className="detail-tab-panel" role="tabpanel" aria-labelledby="detail-tab-clips" tabIndex={0} hidden={activeTab !== 'clips'}>
           <div className="clip-library-heading">
-            <h3 className="sectiontitle">Reel suggestions ({clips.length})</h3>
+            <h3 className="sectiontitle">Reel suggestions ({filteredClips.length}{filteredClips.length !== clips.length ? ` of ${clips.length}` : ''})</h3>
             <div className="clip-library-actions">
+              <label>
+                <span>Review status</span>
+                <select value={clipStatusFilter} onChange={event => setClipStatusFilter(event.target.value)} aria-label="Filter clips by review status">
+                  <option value="all">All statuses</option>
+                  <option value="suggested">Needs review</option>
+                  <option value="approved">Approved</option>
+                  <option value="rejected">Rejected</option>
+                  <option value="rendered">Rendered</option>
+                  <option value="published">Published</option>
+                </select>
+              </label>
+              <label>
+                <span>Assigned editor</span>
+                <select value={clipAssigneeFilter} onChange={event => setClipAssigneeFilter(event.target.value)} aria-label="Filter clips by assigned editor">
+                  <option value="all">All editors</option>
+                  <option value="unassigned">Unassigned</option>
+                  {assignees.map(user => (
+                    <option value={user._id || user.id} key={user._id || user.id}>{user.name}</option>
+                  ))}
+                </select>
+              </label>
               <label>
                 <span>Social format</span>
                 <select value={aspectRatio} onChange={event => setAspectRatio(event.target.value)} aria-label="Social video format">
@@ -225,8 +260,9 @@ export default function PodcastDetailPage({ data, actions }) {
             </div>
           </div>
           {!clips.length && <p className="muted">{selected?.transcript ? 'No reel suggestions are available yet.' : 'Transcribe the source to prepare reel suggestions.'}</p>}
+          {clips.length > 0 && !filteredClips.length && <p className="muted">No clips match these filters.</p>}
           <div className="cliplist">
-            {clips.map(clip => (
+            {filteredClips.map(clip => (
               <article className="clip" key={clip._id}>
                 <div className="score">{clip.score}/10</div>
                 <div className="clipbody">

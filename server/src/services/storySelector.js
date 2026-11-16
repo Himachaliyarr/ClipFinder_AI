@@ -79,9 +79,27 @@ export async function selectStories(transcript, duration, segments = []) {
   } catch (error) {
     throw new Error(`ChatGPT story request failed before receiving a response: ${error.message}`, { cause: error });
   }
-  const data = await response.json();
+  let responseText;
+  try {
+    responseText = await response.text();
+  } catch (error) {
+    throw new Error(`Could not read story-selection provider response: ${error.message}`, { cause: error });
+  }
+  if (!responseText && !response.ok) {
+    throw new Error(`Story-selection provider returned HTTP ${response.status} with an empty response`);
+  }
+  let data;
+  try {
+    data = responseText ? JSON.parse(responseText) : null;
+  } catch {
+    const bodyPreview = responseText.replace(/\s+/g, ' ').slice(0, 300);
+    if (!response.ok) {
+      throw new Error(`Story-selection provider returned HTTP ${response.status} with a non-JSON response${bodyPreview ? `: ${bodyPreview}` : ''}`);
+    }
+    throw new Error(`Story-selection provider returned malformed JSON (HTTP ${response.status})`);
+  }
   if (!response.ok) {
-    throw new Error(`ChatGPT story selection error (${response.status}): ${data.error?.message || 'Request failed'}`);
+    throw new Error(`ChatGPT story selection error (${response.status}): ${data?.error?.message || data?.message || 'Request failed'}`);
   }
   const raw = data.choices?.[0]?.message?.content || '';
   if (!raw) throw new Error('ChatGPT did not return story selection content');
