@@ -22,7 +22,7 @@ test('selects 25-30 timestamped stories through ChatGPT and normalizes response 
   const previousFetch = globalThis.fetch;
   process.env.LLM_API_KEY = 'test-key';
   delete process.env.LLM_MODEL;
-  process.env.LLM_BASE_URL = 'https://api.openai.com/v1/';
+  process.env.LLM_BASE_URL = 'https://api.openai.com/';
   delete process.env.LLM_PROVIDER;
   let requestUrl;
   let requestBody;
@@ -47,7 +47,9 @@ test('selects 25-30 timestamped stories through ChatGPT and normalizes response 
     assert.equal(requestUrl.hostname, 'api.openai.com');
     assert.equal(requestUrl.pathname, '/v1/chat/completions');
     assert.equal(requestHeaders.Authorization, 'Bearer test-key');
-    assert.equal(requestBody.model, 'gpt-4o-mini');
+    assert.equal(requestBody.model, 'gpt-6-astra');
+    assert.equal(requestBody.reasoning_effort, 'low');
+    assert.equal('temperature' in requestBody, false);
     assert.deepEqual(requestBody.response_format, { type: 'json_object' });
     assert.match(requestBody.messages[0].content, /\[0\.0-10\.0s\] Timed story text/);
     assert.equal(result.stories.length, 30);

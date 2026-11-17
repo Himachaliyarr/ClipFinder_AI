@@ -1,3 +1,5 @@
+import { getChatCompletionsUrl } from './openai.js';
+
 export function formatTimedTranscript(segments){
   // Keep the source timestamps in compact windows so the model can choose grounded clip ranges.
   const windows=new Map();
@@ -47,13 +49,17 @@ export async function selectClips(transcript,duration,examples=[],segments=[],si
   const timedTranscript=formatTimedTranscript(segments);
   const sourceText=(timedTranscript||transcript).slice(0,100000);
   const prompt=`You are a short-form podcast editor. Select compelling standalone reel moments from this transcript. Aim for 15-25 clips when the source has enough distinct content; return fewer rather than inventing moments. Return ONLY JSON: {"clips":[{"start":number,"end":number,"hook":string,"title":string,"caption":string,"score":number,"reason":string}]}. Use seconds, keep clips between 20 and 90 seconds when the source duration allows, preserve context, and never exceed ${duration} seconds. The transcript lines include source-time ranges; choose start/end that match those ranges and do not invent timestamps. Prefer strong opinions, stories, surprises, and actionable insights.${examplesText}Transcript with source timings:\n${sourceText}`;
+  const model=process.env.LLM_MODEL||'gpt-6-astra';
+  const generationOptions=model==='gpt-6-astra'
+    ? {reasoning_effort:process.env.LLM_REASONING_EFFORT||'low'}
+    : {temperature:0.3};
   let r;
   try {
-    r=await fetch(`${(process.env.LLM_BASE_URL||'https://api.openai.com/v1').replace(/\/$/,'')}/chat/completions`,{
+    r=await fetch(getChatCompletionsUrl(),{
       method:'POST',
       headers:{Authorization:`Bearer ${key}`,'Content-Type':'application/json'},
       signal,
-      body:JSON.stringify({model:process.env.LLM_MODEL||'gpt-4o-mini',temperature:0.3,response_format:{type:'json_object'},messages:[{role:'user',content:prompt}]})
+      body:JSON.stringify({model,...generationOptions,response_format:{type:'json_object'},messages:[{role:'user',content:prompt}]})
     });
   } catch (error) {
     throw new Error(`Clip selection request failed before receiving a response: ${error.message}`, { cause: error });
