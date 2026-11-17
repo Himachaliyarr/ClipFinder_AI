@@ -13,6 +13,7 @@ const DEEPGRAM_CHUNK_SECONDS=120;
 const OTHER_CHUNK_SECONDS=25;
 const DEEPGRAM_CHUNK_OVERLAP_SECONDS=3;
 const PROVIDER_TIMEOUT_MS=90000;
+const YOUTUBE_TRANSCRIPTION_CONCURRENCY=2;
 
 export async function splitAudio(inputPath,outDir,signal,chunkSeconds=getChunkSeconds()){
   // Chunk long recordings so provider limits and retries do not require re-uploading the full file.
@@ -234,6 +235,45 @@ export function getPcmStreamProgress(chunksYielded,pendingBytes,bytesPerChunk){
   const chunkFraction=Math.min(pendingBytes/bytesPerChunk,1);
   return Math.min(90,20+chunksYielded*3+Math.floor(chunkFraction*2));
 }
+export async function forEachConcurrent(iterable,concurrency,processItem,onComplete,onError){
+  if(!Number.isInteger(concurrency)||concurrency<1) throw new RangeError('Concurrency must be a positive integer');
+  const pending=new Set();
+  let nextIndex=0;
+  let firstError;
+  const completeOne=async()=>{
+    const outcome=await Promise.race(pending);
+    pending.delete(outcome.task);
+    if(outcome.error) throw outcome.error;
+    await onComplete?.(outcome.value,outcome.index);
+  };
+  try{
+    for await(const item of iterable){
+      if(firstError) throw firstError;
+      const index=nextIndex++;
+      let task;
+      task=Promise.resolve()
+        .then(()=>processItem(item,index))
+        .then(value=>({task,index,value}))
+        .catch(error=>{
+          if(!firstError){
+            firstError=error;
+            onError?.(error);
+          }
+          return {task,index,error};
+        });
+      pending.add(task);
+      if(pending.size>=concurrency) await completeOne();
+    }
+    while(pending.size) await completeOne();
+  }catch(error){
+    if(!firstError){
+      firstError=error;
+      onError?.(error);
+    }
+    await Promise.all(pending);
+    throw firstError;
+  }
+}
 async function* streamPcmChunks(audioUrl,signal,chunkSeconds,overlapSeconds=0){
   const child=spawn(ffmpegPath,['-nostdin','-v','error','-rw_timeout','30000000','-i',audioUrl,'-vn','-ac','1','-ar',String(SAMPLE_RATE),'-f','s16le','-acodec','pcm_s16le','pipe:1'],{
     windowsHide:true,
@@ -350,43 +390,59 @@ export async function transcribeYouTubeAudioStream(audioUrl,signal,onProgress){
   const overlapSeconds=provider==='sarvam'?0:DEEPGRAM_CHUNK_OVERLAP_SECONDS;
   let requestFailure=null;
   try{
-    await onProgress?.({progress:20,message:'Streaming YouTube audio'});
     const rawResults=[];
     let completedChunks=0;
+    let scheduledChunks=0;
     let duration=0;
-    for await(const chunk of streamPcmChunks(audioUrl,controller.signal,chunkSeconds,overlapSeconds)){
-      if(chunk.type==='progress'){
-        await onProgress?.({progress:chunk.progress,message:chunk.message});
-        continue;
-      }
-      if(controller.signal.aborted) throw controller.signal.reason||new Error('YouTube transcription cancelled');
-      const {pcm,offset}=chunk;
-      const chunkDuration=pcm.length/PCM_BYTES_PER_SECOND;
-      duration=Math.max(duration,offset+chunkDuration);
-      const audio=pcmToWav(pcm);
-      let result;
-      try{
-        result=await transcribeAudioChunk(
-          audio,
+    let lastReportedProgress=0;
+    const reportProgress=async update=>{
+      lastReportedProgress=Math.max(lastReportedProgress,update.progress);
+      await onProgress?.({...update,progress:lastReportedProgress});
+    };
+    await reportProgress({progress:20,message:'Streaming YouTube audio'});
+    await forEachConcurrent(
+      streamPcmChunks(audioUrl,controller.signal,chunkSeconds,overlapSeconds),
+      YOUTUBE_TRANSCRIPTION_CONCURRENCY,
+      async chunk=>{
+        if(chunk.type==='progress') return chunk;
+        if(controller.signal.aborted) throw controller.signal.reason||new Error('YouTube transcription cancelled');
+        const {pcm,offset,uniqueStart}=chunk;
+        const chunkDuration=pcm.length/PCM_BYTES_PER_SECOND;
+        duration=Math.max(duration,offset+chunkDuration);
+        const chunkIndex=scheduledChunks++;
+        const result=await transcribeAudioChunk(
+          pcmToWav(pcm),
           offset,
           offset+chunkDuration,
           'audio/wav',
-          `youtube-audio-${completedChunks}.wav`,
+          `youtube-audio-${chunkIndex}.wav`,
           controller.signal,
           chunkDuration
         );
-      }catch(error){
+        return {
+          type:'transcription',
+          chunkIndex,
+          chunk:{offset,uniqueStart,duration:chunkDuration},
+          result
+        };
+      },
+      async processed=>{
+        if(processed.type==='progress'){
+          await reportProgress(processed);
+          return;
+        }
+        rawResults[processed.chunkIndex]={chunk:processed.chunk,result:processed.result};
+        completedChunks++;
+        await reportProgress({
+          progress:Math.min(90,20+completedChunks*3),
+          message:`Transcribed ${completedChunks} audio segments`
+        });
+      },
+      error=>{
         if(!requestFailure) requestFailure=error;
         controller.abort(error);
-        throw error;
       }
-      rawResults.push({chunk,result});
-      completedChunks++;
-      await onProgress?.({
-        progress:Math.min(90,20+completedChunks*3),
-        message:`Transcribed ${completedChunks} audio segments`
-      });
-    }
+    );
     if(!rawResults.length) throw new Error('No audio could be read from the YouTube link');
 
     const results=[];
@@ -395,8 +451,8 @@ export async function transcribeYouTubeAudioStream(audioUrl,signal,onProgress){
     let previousDeepgramTranscript='';
     let previousSarvamTranscript='';
     for(const {chunk,result} of rawResults){
-      const {pcm,offset,uniqueStart}=chunk;
-      const end=offset+pcm.length/PCM_BYTES_PER_SECOND;
+      const {offset,uniqueStart,duration:chunkDuration}=chunk;
+      const end=offset+chunkDuration;
       if(result.deepgram){
         const currentDeepgramTranscript=result.deepgram.transcript;
         const reconciled=reconcileChunkSpeakerIds(

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { getPcmStreamProgress, groupTranscriptSegments, parseDeepgramResponse, parseSarvamResponse, reconcileChunkSpeakerIds, removeTranscriptOverlap, transcribeAudioChunk } from '../src/services/deepgram.js';
+import { forEachConcurrent, getPcmStreamProgress, groupTranscriptSegments, parseDeepgramResponse, parseSarvamResponse, reconcileChunkSpeakerIds, removeTranscriptOverlap, transcribeAudioChunk } from '../src/services/deepgram.js';
 
 test('parses word timings and applies chunk offsets', () => {
   const parsed = parseDeepgramResponse({
@@ -101,6 +101,30 @@ test('advances YouTube progress while FFmpeg is extracting a chunk', () => {
   assert.equal(getPcmStreamProgress(0, bytesPerChunk, bytesPerChunk), 22);
   assert.equal(getPcmStreamProgress(1, 0, bytesPerChunk), 23);
   assert.equal(getPcmStreamProgress(30, bytesPerChunk, bytesPerChunk), 90);
+});
+
+test('transcribes streamed chunks concurrently within a bounded limit', async () => {
+  let active = 0;
+  let maximumActive = 0;
+  const results = [];
+
+  await forEachConcurrent(
+    [0, 1, 2, 3],
+    2,
+    async value => {
+      active++;
+      maximumActive = Math.max(maximumActive, active);
+      await new Promise(resolve => setTimeout(resolve, (4 - value) * 5));
+      active--;
+      return value * 2;
+    },
+    (value, index) => {
+      results[index] = value;
+    }
+  );
+
+  assert.equal(maximumActive, 2);
+  assert.deepEqual(results, [0, 2, 4, 6]);
 });
 
 test('groups word timings into sentences and splits at speaker changes', () => {
