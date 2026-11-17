@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import axios from 'axios';
 import { Document, HeadingLevel, Packer, Paragraph, TextRun } from 'docx';
-import { formatClipMetadataCsv, formatTranscriptForExport, formatTranscriptJson, formatTranscriptSrt, formatTranscriptTimestamp, formatTranscriptVtt, getTranscriptLines } from '../utils/transcript.js';
+import { formatClipMetadataCsv, formatStoryMetadataCsv, formatStoryMetadataText, formatTranscriptForExport, formatTranscriptJson, formatTranscriptSrt, formatTranscriptTimestamp, formatTranscriptVtt, getTranscriptLines, getTranscriptLinesInRange } from '../utils/transcript.js';
 import { BrandIntroScreen, LoginScreen, WelcomeScreen, WorkspaceHeader, WorkspaceSidebar } from '../components/AppChrome.jsx';
 import { isPodcastJobActive } from '../components/PodcastJobProgress.jsx';
 import { isSupportedExportFormat } from '../components/TranscriptPanel.jsx';
@@ -655,6 +655,83 @@ export default function App() {
     );
   }
 
+  async function exportStoryMetadata(format = 'pdf') {
+    const stories = (selected?.storyMoments || []).map(story => ({
+      ...story,
+      script: getTranscriptLinesInRange(selected?.segments, story.start, story.end)
+        .map(line => `[${formatTranscriptTimestamp(line.start)} - ${formatTranscriptTimestamp(line.end)}] ${line.text}`)
+        .join('\n'),
+    }));
+    if (!stories.length) return;
+    const normalizedFormat = ['pdf', 'docx', 'txt', 'csv'].includes(format) ? format : 'pdf';
+    const filename = `${transcriptFilename(selected?.title)}-stories`;
+    const rows = stories.map((story, index) => ({
+      title: `${index + 1}. ${story.title || 'Untitled story'}`,
+      time: `${formatTranscriptTimestamp(Number(story.start))} - ${formatTranscriptTimestamp(Number(story.end))}`,
+    }));
+
+    try {
+      if (normalizedFormat === 'csv') {
+        downloadBlob(
+          new Blob([formatStoryMetadataCsv(stories)], { type: 'text/csv;charset=utf-8' }),
+          `${filename}.csv`
+        );
+        return;
+      }
+
+      if (normalizedFormat === 'txt') {
+        downloadBlob(
+          new Blob([`\uFEFF${formatStoryMetadataText(stories)}`], { type: 'text/plain;charset=utf-8' }),
+          `${filename}.txt`
+        );
+        return;
+      }
+
+      if (normalizedFormat === 'docx') {
+        const paragraphs = [
+          new Paragraph({ text: selected?.title || 'Story moments', heading: HeadingLevel.TITLE }),
+          ...stories.flatMap((story, index) => [
+            new Paragraph({ text: rows[index].title, heading: HeadingLevel.HEADING_1 }),
+            new Paragraph({ children: [new TextRun({ text: rows[index].time, bold: true })] }),
+            new Paragraph({ children: [new TextRun({ text: 'Summary: ', bold: true }), new TextRun(String(story.summary || ''))] }),
+            ...(story.excerpt ? [new Paragraph({ children: [new TextRun({ text: 'Excerpt: ', bold: true }), new TextRun(String(story.excerpt))] })] : []),
+            new Paragraph({ children: [new TextRun({ text: 'Exact transcript:', bold: true })] }),
+            ...String(story.script || 'Unavailable for this time range.').split('\n').map(line => new Paragraph({ text: line })),
+            ...(story.reason ? [new Paragraph({ children: [new TextRun({ text: 'Why it stands out: ', bold: true }), new TextRun(String(story.reason))] })] : []),
+            new Paragraph({ children: [new TextRun({ text: `Score: ${String(story.score ?? '')}/10`, bold: true })] }),
+          ]),
+        ];
+        const blob = await Packer.toBlob(new Document({ sections: [{ children: paragraphs }] }));
+        downloadBlob(blob, `${filename}.docx`);
+        return;
+      }
+
+      const printWindow = window.open('', '_blank');
+      if (!printWindow) throw new Error('Allow pop-ups to export stories as PDF.');
+      const printRows = stories.map((story, index) => `
+        <article>
+          <h2>${escapeHtml(rows[index].title)}</h2>
+          <p><strong>${escapeHtml(rows[index].time)}</strong></p>
+          <p><strong>Summary:</strong> ${escapeHtml(story.summary || '')}</p>
+          ${story.excerpt ? `<p><strong>Excerpt:</strong> ${escapeHtml(story.excerpt)}</p>` : ''}
+          <p><strong>Exact transcript:</strong></p>
+          <pre>${escapeHtml(story.script || 'Unavailable for this time range.')}</pre>
+          ${story.reason ? `<p><strong>Why it stands out:</strong> ${escapeHtml(story.reason)}</p>` : ''}
+          <p><strong>Score:</strong> ${escapeHtml(story.score ?? '')}/10</p>
+        </article>
+      `).join('');
+      printWindow.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>${escapeHtml(selected?.title || 'Story moments')}</title><style>body{font:12pt Arial,sans-serif;color:#111;margin:24mm}h1{font-size:20pt}h2{font-size:15pt;margin:0 0 8px}article{margin:0 0 22px;break-inside:avoid}p{line-height:1.5;margin:6px 0;white-space:pre-wrap}pre{font:inherit;line-height:1.5;white-space:pre-wrap;margin:6px 0 12px}@media print{body{margin:18mm}}</style></head><body><h1>${escapeHtml(selected?.title || 'Story moments')}</h1>${printRows}</body></html>`);
+      printWindow.document.close();
+      printWindow.onafterprint = () => printWindow.close();
+      setTimeout(() => {
+        printWindow.focus();
+        printWindow.print();
+      }, 300);
+    } catch (e) {
+      setError(e.message || 'Could not export stories');
+    }
+  }
+
   async function generateOpusClips() {
     setBusy(true);
     try {
@@ -963,6 +1040,7 @@ export default function App() {
               exportTranscript,
               saveTranscript,
               exportClipMetadata,
+              exportStoryMetadata,
               setOpenTranscriptFor,
               updateClip,
               editCameraPlan,

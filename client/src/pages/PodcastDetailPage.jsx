@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { CheckCircle } from 'lucide-react';
-import { formatTranscriptTimestamp } from '../utils/transcript.js';
+import { formatTranscriptTimestamp, getTranscriptLinesInRange } from '../utils/transcript.js';
 import PodcastJobProgress, {
   canRestartPodcastJob,
   isPodcastJobActive,
@@ -47,11 +47,13 @@ export default function PodcastDetailPage({ data, actions }) {
     downloadClip,
     saveTranscript,
     exportClipMetadata,
+    exportStoryMetadata,
     previewSourceClip,
     closeSourcePreview,
   } = actions;
   const [activeTab, setActiveTab] = useState('transcript');
   const [aspectRatio, setAspectRatio] = useState('9:16');
+  const [storyExportFormat, setStoryExportFormat] = useState('pdf');
   const [clipStatusFilter, setClipStatusFilter] = useState('all');
   const [clipAssigneeFilter, setClipAssigneeFilter] = useState('all');
   const filteredClips = clips.filter(clip => {
@@ -200,23 +202,59 @@ export default function PodcastDetailPage({ data, actions }) {
                   </div>
                 )}
               </div>
+              {selected?.storyMoments?.length > 0 && (
+                <div className="transcript-actions">
+                  <select
+                    className="transcript-export-format"
+                    aria-label="Story export format"
+                    value={storyExportFormat}
+                    onChange={event => setStoryExportFormat(event.target.value)}
+                  >
+                    <option value="pdf">PDF</option>
+                    <option value="docx">Word (.docx)</option>
+                    <option value="txt">Text (.txt)</option>
+                    <option value="csv">CSV (.csv)</option>
+                  </select>
+                  <button type="button" className="secondary" onClick={() => exportStoryMetadata(storyExportFormat)}>Export stories</button>
+                </div>
+              )}
             </div>
             {selected?.storyMoments?.length ? (
               <div className="story-grid">
-                {selected.storyMoments.map((story, index) => (
-                  <article className="story-card" key={`${story.start}-${index}`}>
-                    <div className="story-card-top">
-                      <span className="story-time">
-                        {formatTranscriptTimestamp(story.start)} – {formatTranscriptTimestamp(story.end)}
-                      </span>
-                      <span className="score">{story.score}/10</span>
-                    </div>
-                    <h4>{story.title}</h4>
-                    <p>{story.summary}</p>
-                    {story.excerpt && <blockquote>{story.excerpt}</blockquote>}
-                    {story.reason && <small className="muted">{story.reason}</small>}
-                  </article>
-                ))}
+                {selected.storyMoments.map((story, index) => {
+                  const scriptLines = getTranscriptLinesInRange(selected.segments, story.start, story.end);
+                  return (
+                    <article className="story-card" key={`${story.start}-${index}`}>
+                      <div className="story-card-top">
+                        <span className="story-time">
+                          {formatTranscriptTimestamp(story.start)} – {formatTranscriptTimestamp(story.end)}
+                        </span>
+                        <span className="score">{story.score}/10</span>
+                      </div>
+                      <h4>{story.title}</h4>
+                      <p>{story.summary}</p>
+                      {scriptLines.length ? (
+                        <div className="story-script">
+                          <strong className="story-script-heading">Exact transcript</strong>
+                          {scriptLines.map(line => {
+                            return (
+                              <p className="story-script-line" key={`${line.start}-${line.end}`}>
+                                <span className="story-script-time">
+                                  {formatTranscriptTimestamp(line.start)}–{formatTranscriptTimestamp(line.end)}
+                                </span>
+                                <span>{line.text}</span>
+                              </p>
+                            );
+                          })}
+                        </div>
+                      ) : (
+                        <p className="muted">Timestamped transcript is unavailable for this range.</p>
+                      )}
+                      {story.excerpt && <blockquote>{story.excerpt}</blockquote>}
+                      {story.reason && <small className="muted">{story.reason}</small>}
+                    </article>
+                  );
+                })}
               </div>
             ) : !hasStoryMomentJob && (
               <p className="muted empty-inline">{hasTranscript ? 'No story moments yet. Use “Find story moments” above to generate them.' : 'Transcribe this podcast to find story moments.'}</p>

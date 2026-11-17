@@ -2,11 +2,14 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   formatClipMetadataCsv,
+  formatStoryMetadataCsv,
+  formatStoryMetadataText,
   formatTranscriptForExport,
   formatTranscriptJson,
   formatTranscriptSrt,
   formatTranscriptVtt,
   getTranscriptLines,
+  getTranscriptLinesInRange,
 } from '../src/utils/transcript.js';
 
 test('groups word timings by sentence and starts a new line when the speaker changes', () => {
@@ -33,6 +36,20 @@ test('keeps provider phrase timings as separate lines and skips invalid segments
   assert.deepEqual(lines, [
     { start: 2, end: 3, speaker: null, text: 'First phrase' },
     { start: 3.1, end: 4, speaker: null, text: 'Second phrase' },
+  ]);
+});
+
+test('selects only timestamped transcript segments overlapping a story range', () => {
+  const lines = getTranscriptLinesInRange([
+    { start: 0, end: 0.4, text: 'Before.', timingType: 'word' },
+    { start: 0.5, end: 0.8, text: 'This', timingType: 'word' },
+    { start: 0.9, end: 1.1, text: 'is', timingType: 'word' },
+    { start: 1.2, end: 1.4, text: 'inside.', timingType: 'word' },
+    { start: 1.5, end: 1.9, text: 'After.', timingType: 'word' },
+  ], 0.5, 1.5);
+
+  assert.deepEqual(lines, [
+    { start: 0.5, end: 1.4, speaker: null, text: 'This is inside.' },
   ]);
 });
 
@@ -71,5 +88,37 @@ test('exports clip metadata as escaped CSV', () => {
   assert.equal(
     formatClipMetadataCsv([{ title: 'A "quote"', start: 1, end: 2, caption: 'a,b', status: 'approved', assignedTo: { name: 'Editor' } }]),
     '\uFEFF"Title","Start (seconds)","End (seconds)","Hook","Caption","Status","Assigned editor"\r\n"A ""quote""","1","2","","a,b","approved","Editor"'
+  );
+});
+
+test('exports story moments with metadata as spreadsheet-safe CSV', () => {
+  assert.equal(
+    formatStoryMetadataCsv([{
+      title: 'A "story"',
+      start: 12.5,
+      end: 42,
+      summary: 'A compelling, self-contained story.',
+      excerpt: '=HYPERLINK("https://example.com")',
+      script: '[00:12.5 - 00:14.0] This is the exact transcript.',
+      reason: 'Strong payoff',
+      score: 9,
+    }]),
+    '\uFEFF"Title","Start (seconds)","End (seconds)","Summary","Excerpt","Exact transcript","Reason","Score"\r\n"A ""story""","12.5","42","A compelling, self-contained story.","\'=HYPERLINK(""https://example.com"")","[00:12.5 - 00:14.0] This is the exact transcript.","Strong payoff","9"'
+  );
+});
+
+test('exports story moments with readable timestamps as plain text', () => {
+  assert.equal(
+    formatStoryMetadataText([{
+      title: 'The breakthrough',
+      start: 12.5,
+      end: 42,
+      summary: 'A compelling story.',
+      excerpt: 'It finally worked.',
+      script: '[00:12.5 - 00:14.0] The exact words.\n[00:14.0 - 00:15.0] Continue here.',
+      reason: 'Clear payoff',
+      score: 9,
+    }]),
+    'Story 1: The breakthrough\nTime: 00:12.5 - 00:42.0\nSummary: A compelling story.\nExcerpt: It finally worked.\nExact transcript:\n[00:12.5 - 00:14.0] The exact words.\n[00:14.0 - 00:15.0] Continue here.\nWhy it stands out: Clear payoff\nScore: 9/10'
   );
 });

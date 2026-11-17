@@ -49,6 +49,40 @@ export function formatClipMetadataCsv(clips) {
   return `\uFEFF${rows.map(row => row.map(quote).join(',')).join('\r\n')}`;
 }
 
+export function formatStoryMetadataCsv(stories) {
+  const quote = value => {
+    const text = String(value ?? '');
+    const safeText = /^[\u0000-\u0020]*[=+\-@]/.test(text) ? `'${text}` : text;
+    return `"${safeText.replace(/"/g, '""')}"`;
+  };
+  const rows = [
+    ['Title', 'Start (seconds)', 'End (seconds)', 'Summary', 'Excerpt', 'Exact transcript', 'Reason', 'Score'],
+    ...stories.map(story => [
+      story.title,
+      story.start,
+      story.end,
+      story.summary,
+      story.excerpt,
+      story.script || 'Unavailable for this time range.',
+      story.reason,
+      story.score,
+    ]),
+  ];
+  return `\uFEFF${rows.map(row => row.map(quote).join(',')).join('\r\n')}`;
+}
+
+export function formatStoryMetadataText(stories) {
+  return stories.map((story, index) => [
+    `Story ${index + 1}: ${String(story.title || 'Untitled story')}`,
+    `Time: ${formatTranscriptTimestamp(Number(story.start))} - ${formatTranscriptTimestamp(Number(story.end))}`,
+    `Summary: ${String(story.summary || '')}`,
+    ...(story.excerpt ? [`Excerpt: ${story.excerpt}`] : []),
+    `Exact transcript:\n${String(story.script || 'Unavailable for this time range.')}`,
+    ...(story.reason ? [`Why it stands out: ${story.reason}`] : []),
+    `Score: ${String(story.score ?? '')}/10`,
+  ].join('\n')).join('\n\n');
+}
+
 function endsSentence(text) {
   return /[.!?।॥]["'”’)\]]*$/.test(text);
 }
@@ -96,6 +130,17 @@ export function getTranscriptLines(segments) {
   }
   flush();
   return lines;
+}
+
+export function getTranscriptLinesInRange(segments, start, end) {
+  const rangeStart = Number(start);
+  const rangeEnd = Number(end);
+  if (!Array.isArray(segments) || !Number.isFinite(rangeStart) || !Number.isFinite(rangeEnd) || rangeEnd <= rangeStart) {
+    return [];
+  }
+  return getTranscriptLines(segments.filter(segment => (
+    Number(segment?.start) < rangeEnd && Number(segment?.end) > rangeStart
+  )));
 }
 
 export function formatSpeaker(speaker) {
