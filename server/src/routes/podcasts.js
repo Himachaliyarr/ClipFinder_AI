@@ -694,6 +694,10 @@ r.get('/analytics/activity', auth, allow('admin'), wrap(async (req, res) => {
     return { ...event, details };
   }));
 }));
+r.delete('/analytics/activity', auth, allow('admin'), wrap(async (req, res) => {
+  const result = await Activity.deleteMany({});
+  res.json({ message: 'Activity history cleared', deletedCount: result.deletedCount });
+}));
 r.get('/notifications', auth, wrap(async (req, res) => {
   const sinceValue = typeof req.query.since === 'string' ? new Date(req.query.since) : null;
   if (!sinceValue || !Number.isFinite(sinceValue.getTime())) {

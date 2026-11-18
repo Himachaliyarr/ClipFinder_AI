@@ -280,6 +280,17 @@
   margin: 0;
 }
 
+.activity-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.activity-heading .sectiontitle {
+  margin: 32px 0 15px;
+}
+
 .transcript-editor {
   display: grid;
   gap: 12px;
@@ -806,7 +817,16 @@ a:focus-visible {
     flex-direction: column;
   }
 
+  .activity-heading {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
   .clip-library-heading .sectiontitle {
+    margin-bottom: 4px;
+  }
+
+  .activity-heading .sectiontitle {
     margin-bottom: 4px;
   }
 

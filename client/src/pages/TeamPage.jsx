@@ -1,7 +1,7 @@
 // Team account management and audit history are rendered as a dedicated page.
 export default function TeamPage({ data, actions }) {
   const { users, activity, backupStatus, newUser, editingUser, busy, currentUser } = data;
-  const { setNewUser, createUser, setEditingUser, updateUser, startEditingUser, recordRestoreTest } = actions;
+  const { setNewUser, createUser, setEditingUser, updateUser, startEditingUser, recordRestoreTest, clearActivity } = actions;
   const backupLabel = backupStatus?.status === 'success'
     ? 'Last backup succeeded'
     : backupStatus?.status === 'failed'
@@ -124,7 +124,12 @@ export default function TeamPage({ data, actions }) {
           </div>
         )}
       </div>
-      <h3 className="sectiontitle">Recent activity</h3>
+      <div className="activity-heading">
+        <h3 className="sectiontitle">Recent activity</h3>
+        <button type="button" className="secondary" onClick={clearActivity} disabled={busy || !activity.length}>
+          Clear all activity
+        </button>
+      </div>
       <div className="activitylist" aria-live="polite">
         {activity.map(event => (
           <article className="activityitem" key={event._id}>

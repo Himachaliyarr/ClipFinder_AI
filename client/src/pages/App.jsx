@@ -309,6 +309,20 @@ export default function App() {
     }
   }
 
+  async function clearActivity() {
+    if (!window.confirm('Permanently clear all activity history? This cannot be undone.')) return;
+    setBusy(true);
+    try {
+      const { data } = await api.delete('/podcasts/analytics/activity');
+      setActivity([]);
+      setError(data.message || `Cleared ${data.deletedCount} activity records.`);
+    } catch (e) {
+      setError(e.response?.data?.error || 'Could not clear activity history');
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function recordRestoreTest(backupFolder) {
     const notes = window.prompt('Only continue after a successful restore drill. Record the test database or validation notes:');
     if (!notes?.trim()) return;
@@ -968,7 +982,7 @@ export default function App() {
         {page === 'team' && currentUser?.role === 'admin' ? (
           <TeamPage
             data={{ users, activity, backupStatus, newUser, editingUser, busy, currentUser }}
-            actions={{ setNewUser, createUser, setEditingUser, updateUser, startEditingUser, recordRestoreTest }}
+            actions={{ setNewUser, createUser, setEditingUser, updateUser, startEditingUser, recordRestoreTest, clearActivity }}
           />
         ) : page === 'dashboard' ? (
           <DashboardPage
