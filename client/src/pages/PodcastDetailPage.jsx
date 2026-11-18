@@ -32,6 +32,7 @@ export default function PodcastDetailPage({ data, actions }) {
     setSpeakerKey,
     setExtraFiles,
     stopPodcastJob,
+    stopGeneration,
     restartPodcastJob,
     transcribe,
     generateStories,
@@ -119,22 +120,36 @@ export default function PodcastDetailPage({ data, actions }) {
           {busy ? 'Starting…' : 'Start transcription'}
         </button>
         {hasTranscript && (
-          <button
-            className="secondary"
-            onClick={generateStories}
-            disabled={busy || hasStoryMomentJob}
-          >
-            {hasStoryMomentJob ? 'Finding stories…' : selected?.storyMomentsStatus === 'completed' ? 'Regenerate stories' : 'Find story moments'}
-          </button>
+          <>
+            <button
+              className="secondary"
+              onClick={generateStories}
+              disabled={busy || hasStoryMomentJob}
+            >
+              {selected?.storyMomentsStatus === 'completed' ? 'Regenerate stories' : 'Find story moments'}
+            </button>
+            {hasStoryMomentJob && (
+              <button className="secondary" onClick={() => stopGeneration(selected._id, 'stories')} disabled={busy}>
+                Stop story finding
+              </button>
+            )}
+          </>
         )}
         {selected?.transcript && (selected?.sourceUrl || selected?.sourceFiles?.some(file => file.kind === 'video')) && (
-          <button
-            className="secondary"
-            onClick={openReelStoryPicker}
-            disabled={busy || hasOpusClipJob}
-          >
-            Generate Reels
-          </button>
+          <>
+            <button
+              className="secondary"
+              onClick={openReelStoryPicker}
+              disabled={busy || hasOpusClipJob}
+            >
+              Generate Reels
+            </button>
+            {hasOpusClipJob && (
+              <button className="secondary" onClick={() => stopGeneration(selected._id, 'reels')} disabled={busy}>
+                Stop reel generation
+              </button>
+            )}
+          </>
         )}
       </section>
       <section className="create sourceupload">
@@ -201,13 +216,15 @@ export default function PodcastDetailPage({ data, actions }) {
                     ? 'Story moments are ready.'
                     : selected?.storyMomentsStatus === 'failed'
                       ? 'Story selection failed. Please retry or contact an administrator.'
-                      : hasStoryMomentJob
-                        ? 'Finding story moments…'
-                        : hasTranscript
-                          ? selected?.sourceUrl && !selected?.sourceFiles?.length
-                            ? 'Generate story moments manually from this YouTube transcript.'
-                            : 'Story cards are generated automatically after transcription.'
-                          : 'Transcribe the source to find story moments.'}
+                      : selected?.storyMomentsStatus === 'cancelled'
+                        ? 'Story finding was stopped.'
+                        : hasStoryMomentJob
+                          ? 'Finding story moments…'
+                          : hasTranscript
+                            ? selected?.sourceUrl && !selected?.sourceFiles?.length
+                              ? 'Generate story moments manually from this YouTube transcript.'
+                              : 'Story cards are generated automatically after transcription.'
+                            : 'Transcribe the source to find story moments.'}
                 </p>
                 {hasStoryMomentJob && (
                   <div className="async-progress">
@@ -371,7 +388,13 @@ export default function PodcastDetailPage({ data, actions }) {
             <section className="opusclip-results">
               <h3>Generated reels ({selected.opusClipClips?.length || 0})</h3>
               <p className={selected.opusClipStatus === 'failed' ? 'error' : 'muted'}>
-                {selected.opusClipStatus === 'completed' ? 'Reels are ready.' : selected.opusClipStatus === 'failed' ? 'Reel generation failed. Please try again.' : 'Reels are being generated...'}
+                {selected.opusClipStatus === 'completed'
+                  ? 'Reels are ready.'
+                  : selected.opusClipStatus === 'failed'
+                    ? 'Reel generation failed. Please try again.'
+                    : selected.opusClipStatus === 'cancelled'
+                      ? 'Reel generation was stopped.'
+                      : 'Reels are being generated...'}
               </p>
               {hasOpusClipJob && (
                 <div className="async-progress">

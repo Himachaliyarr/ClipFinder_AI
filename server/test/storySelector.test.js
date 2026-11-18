@@ -154,3 +154,25 @@ test('identifies network failures from ChatGPT separately from API responses', a
     else process.env.LLM_API_KEY = previousKey;
   }
 });
+
+test('passes the worker cancellation signal to the story-selection request', async () => {
+  const previousKey = process.env.LLM_API_KEY;
+  const previousFetch = globalThis.fetch;
+  const controller = new AbortController();
+  process.env.LLM_API_KEY = 'test-key';
+  globalThis.fetch = async (_url, options) => {
+    assert.equal(options.signal.aborted, false);
+    return new Promise((_, reject) => {
+      options.signal.addEventListener('abort', () => reject(options.signal.reason), { once: true });
+      controller.abort(new Error('Processing cancelled by user'));
+    });
+  };
+
+  try {
+    await assert.rejects(selectStories('Transcript text', 900, [], controller.signal), /Processing cancelled by user/);
+  } finally {
+    globalThis.fetch = previousFetch;
+    if (previousKey === undefined) delete process.env.LLM_API_KEY;
+    else process.env.LLM_API_KEY = previousKey;
+  }
+});

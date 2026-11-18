@@ -55,7 +55,7 @@ const PodcastSchema = new Schema(
     storyMoments: { type: [Schema.Types.Mixed], default: [] },
     storyMomentsStatus: {
       type: String,
-      enum: ["idle", "queued", "processing", "completed", "failed"],
+      enum: ["idle", "queued", "processing", "completed", "failed", "cancelled"],
       default: "idle",
     },
     storyMomentsMessage: String,
@@ -64,7 +64,7 @@ const PodcastSchema = new Schema(
     opusClipOrgId: String,
     opusClipStatus: {
       type: String,
-      enum: ["idle", "queued", "processing", "completed", "failed"],
+      enum: ["idle", "queued", "processing", "completed", "failed", "cancelled"],
       default: "idle",
     },
     opusClipMessage: String,

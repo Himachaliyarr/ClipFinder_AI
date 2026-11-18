@@ -4,7 +4,7 @@ import fs from 'node:fs/promises';
 import { Worker } from 'bullmq';
 import { connectDB } from '../config/db.js';
 import { Podcast, Clip, Activity } from '../models/index.js';
-import { connection, enqueueTranscription, enqueueStorySelection, enqueueOpusClipPoll, mediaJobCancellationKey } from '../queue.js';
+import { connection, enqueueTranscription, enqueueStorySelection, enqueueOpusClipPoll, mediaJobCancellationKey, requestMediaJobCancellation } from '../queue.js';
 import { transcribeLongAudio, transcribeYouTubeAudioStream } from '../services/deepgram.js';
 import { selectClips } from '../services/clipSelector.js';
 import { selectStories } from '../services/storySelector.js';
@@ -190,7 +190,8 @@ async function processMediaJob(job, signal) {
       $set: { storyMomentsStatus: 'processing', storyMomentsMessage: 'Finding story moments' },
       $unset: { storyMomentsError: 1 }
     });
-    const selected = await selectStories(podcast.transcript, podcast.duration, podcast.segments || []);
+    const selected = await selectStories(podcast.transcript, podcast.duration, podcast.segments || [], signal);
+    assertJobRunning(signal);
     await Podcast.findByIdAndUpdate(podcast._id, {
       $set: {
         storyMoments: selected.stories,
@@ -328,12 +329,14 @@ async function processMediaJob(job, signal) {
           .limit(20)
           .select('title hook caption reason performance')
           .lean();
-        const selection = await selectClips(podcast.transcript, podcast.duration, examples, podcast.segments || []);
+        const selection = await selectClips(podcast.transcript, podcast.duration, examples, podcast.segments || [], signal);
+        assertJobRunning(signal);
         if (!selection.clips?.length) {
           throw new Error(selection.warning || 'No reel moments were selected for OpusClip');
         }
         moments = selection.clips.slice(0, 8);
         await Clip.insertMany(moments.map(moment => ({ ...moment, podcast: podcast._id })));
+        assertJobRunning(signal);
       }
 
       openAiMoments = moments.map(moment => ({
@@ -351,7 +354,9 @@ async function processMediaJob(job, signal) {
       }
     });
 
-    const project = await createOpusClipProject(podcast, openAiMoments);
+    assertJobRunning(signal);
+    const project = await createOpusClipProject(podcast, openAiMoments, signal);
+    assertJobRunning(signal);
     await Podcast.findByIdAndUpdate(podcast._id, {
       $set: {
         opusClipProjectId: project.projectId,
@@ -360,14 +365,21 @@ async function processMediaJob(job, signal) {
         opusClipMessage: 'OpusClip is generating your reels'
       }
     });
-    await enqueueOpusClipPoll(podcast.id, job.data.userId);
+    const pollJob = await enqueueOpusClipPoll(podcast.id, job.data.userId);
+    try {
+      assertJobRunning(signal);
+    } catch (error) {
+      await requestMediaJobCancellation(pollJob);
+      throw error;
+    }
     return { podcastId: podcast.id, opusClipProjectId: project.projectId };
   }
   if (job.name === 'opusclip-poll') {
     const podcast = await Podcast.findById(job.data.podcastId);
     if (!podcast) throw new Error('Podcast not found');
     if (!podcast.opusClipProjectId) throw new Error('OpusClip project ID is missing');
-    const clips = await getOpusClipProjectClips(podcast.opusClipProjectId, podcast.opusClipOrgId);
+    const clips = await getOpusClipProjectClips(podcast.opusClipProjectId, podcast.opusClipOrgId, signal);
+    assertJobRunning(signal);
     if (clips.length) {
       await Podcast.findByIdAndUpdate(podcast._id, {
         $set: {
@@ -400,7 +412,13 @@ async function processMediaJob(job, signal) {
     await Podcast.findByIdAndUpdate(podcast._id, {
       $set: { opusClipStatus: 'processing', opusClipMessage: 'OpusClip is generating reels' }
     });
-    await enqueueOpusClipPoll(podcast.id, job.data.userId, attempt + 1);
+    const pollJob = await enqueueOpusClipPoll(podcast.id, job.data.userId, attempt + 1);
+    try {
+      assertJobRunning(signal);
+    } catch (error) {
+      await requestMediaJobCancellation(pollJob);
+      throw error;
+    }
     await job.updateProgress({ percent: Math.min(95, Math.round((attempt / 45) * 100)), message: 'Waiting for OpusClip reels' });
     return { podcastId: podcast.id, pending: true };
   }
@@ -472,6 +490,18 @@ worker.on('failed', async (job, err) => {
           jobMessage: 'Processing cancelled'
         },
         $unset: { error: 1 }
+      });
+      return;
+    }
+    if (err?.code === 'JOB_CANCELLED' && job?.name === 'select-stories') {
+      await Podcast.findByIdAndUpdate(job.data.podcastId, {
+        $set: { storyMomentsStatus: 'cancelled', storyMomentsMessage: 'Story finding stopped' }
+      });
+      return;
+    }
+    if (err?.code === 'JOB_CANCELLED' && ['opusclip-generate','opusclip-poll'].includes(job?.name)) {
+      await Podcast.findByIdAndUpdate(job.data.podcastId, {
+        $set: { opusClipStatus: 'cancelled', opusClipMessage: 'Reel generation stopped' }
       });
       return;
     }

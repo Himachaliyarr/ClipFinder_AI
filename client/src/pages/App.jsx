@@ -264,6 +264,19 @@ export default function App() {
     }
   }
 
+  async function stopGeneration(podcastId, generation) {
+    setBusy(true);
+    try {
+      const { data } = await api.post(`/podcasts/${podcastId}/cancel-generation`, { generation });
+      setError(data.message || 'Stop requested.');
+      await refresh();
+    } catch (e) {
+      setError(e.response?.data?.error || 'Could not stop generation');
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function restartPodcastJob(podcastId) {
     setBusy(true);
     try {
@@ -1033,6 +1046,7 @@ export default function App() {
               setSpeakerKey,
               setExtraFiles,
               stopPodcastJob,
+              stopGeneration,
               restartPodcastJob,
               transcribe,
               generateStories,

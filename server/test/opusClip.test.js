@@ -61,6 +61,24 @@ test('creates an OpusClip ClipAnything project directly from a YouTube source', 
   assert.equal(body.renderPref.layoutAspectRatio, 'portrait');
 });
 
+test('passes the worker cancellation signal to OpusClip project creation', async t => {
+  const controller = new AbortController();
+  mockEnvironment(t, async (_url, options) => new Promise((_, reject) => {
+    assert.equal(options.signal, controller.signal);
+    options.signal.addEventListener('abort', () => reject(options.signal.reason), { once: true });
+    controller.abort(new Error('Processing cancelled by user'));
+  }));
+
+  await assert.rejects(
+    createOpusClipProject({
+      title: 'Podcast episode',
+      sourceUrl: 'https://www.youtube.com/watch?v=example',
+      sourceFiles: [],
+    }, openAiMoments, controller.signal),
+    /Processing cancelled by user/,
+  );
+});
+
 test('uploads a local video through OpusClip resumable upload before creating the project', async t => {
   const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'opusclip-test-'));
   t.after(() => fs.rm(tempDir, { recursive: true, force: true }));

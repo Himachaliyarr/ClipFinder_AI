@@ -481,6 +481,64 @@ r.post('/:id/cancel', auth, allow('admin','editor'), wrap(async (req, res) => {
   }
   return res.status(409).json({ error: `This job is ${cancellation} and cannot be stopped` });
 }));
+r.post('/:id/cancel-generation', auth, allow('admin','editor'), wrap(async (req, res) => {
+  if (!validId(req.params.id)) return res.status(400).json({ error: 'Invalid podcast id' });
+  const config = {
+    stories: {
+      statusField: 'storyMomentsStatus',
+      messageField: 'storyMomentsMessage',
+      jobs: new Set(['select-stories']),
+      label: 'Story finding',
+    },
+    reels: {
+      statusField: 'opusClipStatus',
+      messageField: 'opusClipMessage',
+      jobs: new Set(['opusclip-generate', 'opusclip-poll']),
+      label: 'Reel generation',
+    },
+  }[req.body?.generation];
+  if (!config) return res.status(400).json({ error: 'Choose stories or reels to stop' });
+
+  const podcast = await Podcast.findById(req.params.id);
+  if (!podcast) return res.status(404).json({ error: 'Podcast not found' });
+  if (!['queued','processing'].includes(podcast[config.statusField])) {
+    return res.status(409).json({ error: `${config.label} is not in progress` });
+  }
+
+  const jobs = await mediaQueue.getJobs(['waiting','active','delayed','paused'], 0, -1);
+  const matchingJobs = jobs.filter(job => (
+    config.jobs.has(job.name) && String(job.data?.podcastId) === podcast.id
+  ));
+  let activeCancellation = false;
+  let cancellationRequested = false;
+  for (const job of matchingJobs) {
+    const cancellation = await requestMediaJobCancellation(job);
+    if (cancellation === 'cancelling') {
+      activeCancellation = true;
+      cancellationRequested = true;
+    } else if (cancellation === 'cancelled') {
+      cancellationRequested = true;
+    }
+  }
+  if (!cancellationRequested) {
+    return res.status(409).json({ error: 'The generation job could not be found; refresh and try again' });
+  }
+
+  const message = activeCancellation
+    ? 'Cancellation requested. Waiting for the worker to stop.'
+    : `${config.label} stopped`;
+  const updated = await Podcast.updateOne(
+    { _id: podcast._id, [config.statusField]: { $in: ['queued','processing'] } },
+    { $set: { [config.statusField]: activeCancellation ? 'processing' : 'cancelled', [config.messageField]: message } }
+  );
+  if (!updated.matchedCount) {
+    return res.status(409).json({ error: 'The generation status changed while stopping; refresh and try again' });
+  }
+  return res.status(activeCancellation ? 202 : 200).json({
+    message: activeCancellation ? `${config.label} stop requested` : message,
+    status: activeCancellation ? 'processing' : 'cancelled',
+  });
+}));
 r.post('/:id/restart', auth, allow('admin','editor'), wrap(async (req, res) => {
   if (!validId(req.params.id)) return res.status(400).json({ error: 'Invalid podcast id' });
   const podcast = await Podcast.findById(req.params.id);

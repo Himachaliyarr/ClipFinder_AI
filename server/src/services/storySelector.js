@@ -49,7 +49,7 @@ function parseStoryResponse(raw, duration) {
   return stories;
 }
 
-export async function selectStories(transcript, duration, segments = []) {
+export async function selectStories(transcript, duration, segments = [], signal) {
   const key = process.env.LLM_API_KEY;
   if (!key) throw new Error('LLM_API_KEY is not configured in the server .env file');
   if (!transcript?.trim()) throw new Error('No transcript text is available for story selection');
@@ -67,13 +67,16 @@ export async function selectStories(transcript, duration, segments = []) {
     : { temperature: 0.3 };
   let response;
   try {
+    const requestSignal = signal
+      ? AbortSignal.any([signal, AbortSignal.timeout(90_000)])
+      : AbortSignal.timeout(90_000);
     response = await fetch(url, {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${key}`,
         'Content-Type': 'application/json',
       },
-      signal: AbortSignal.timeout(90_000),
+      signal: requestSignal,
       body: JSON.stringify({
         model,
         ...generationOptions,
