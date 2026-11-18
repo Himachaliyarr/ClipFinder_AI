@@ -1,7 +1,9 @@
-import React, { useEffect, useRef } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import {
   Clapperboard,
   Bell,
+  Eye,
+  EyeOff,
   Film,
   Moon,
   RefreshCw,
@@ -30,29 +32,77 @@ export function ThemeToggle({ theme, onToggle }) {
 }
 
 export function LoginScreen({ theme, onToggleTheme, onLogin, error }) {
+  const [showPassword, setShowPassword] = useState(false);
+  const [showPasswordHelp, setShowPasswordHelp] = useState(false);
+
   return (
     <main className="login" data-theme={theme}>
       <ThemeToggle theme={theme} onToggle={onToggleTheme} />
-      <div className="brand">
-        <Film /> ClipFinder <b>AI</b>
-      </div>
-      <form onSubmit={onLogin} aria-labelledby="team-sign-in-heading">
-        <h1 id="team-sign-in-heading">Team sign in</h1>
-        <label className="sr-only" htmlFor="sign-in-email">Email</label>
-        <input id="sign-in-email" name="email" type="email" placeholder="Email" autoComplete="username" required />
-        <label className="sr-only" htmlFor="sign-in-password">Password</label>
-        <input
-          id="sign-in-password"
-          name="password"
-          type="password"
-          placeholder="Password"
-          autoComplete="current-password"
-          required
-        />
-        <button type="submit">Sign in</button>
-        <p className="muted">Sign in with admin email and password</p>
-        {error && <p className="error" role="alert">{error}</p>}
-      </form>
+      <section className="login-intro" aria-label="ClipFinder AI">
+        <div className="brand">
+          <Film /> ClipFinder <b>AI</b>
+        </div>
+        <span className="login-eyebrow">YOUR CREATOR WORKSPACE</span>
+        <h1>Long videos,<strong>ready-to-post clips.</strong></h1>
+        <p className="login-intro-copy">Find the moments worth sharing. Turn full-length conversations into short-form content your audience will watch.</p>
+        <div className="login-intro-note">
+          <Clapperboard size={18} aria-hidden="true" />
+          <span>One workspace for stories, reels, and your team.</span>
+        </div>
+      </section>
+      <section className="login-panel">
+        <form onSubmit={onLogin} aria-labelledby="team-sign-in-heading">
+          <div className="login-form-heading">
+            <span className="login-eyebrow">WELCOME BACK</span>
+            <h2 id="team-sign-in-heading">Team sign in</h2>
+            <p>Use your team account to continue.</p>
+          </div>
+          <label className="login-field" htmlFor="sign-in-email">
+            <span>Work email</span>
+            <input id="sign-in-email" name="email" type="email" placeholder="name@company.com" autoComplete="username" required />
+          </label>
+          <div className="login-field">
+            <label htmlFor="sign-in-password">Password</label>
+            <span className="login-password-input">
+              <input
+                id="sign-in-password"
+                name="password"
+                type={showPassword ? "text" : "password"}
+                placeholder="Enter your password"
+                autoComplete="current-password"
+                required
+              />
+              <button
+                className="login-password-toggle"
+                type="button"
+                onClick={() => setShowPassword(current => !current)}
+                aria-label={showPassword ? "Hide password" : "Show password"}
+                title={showPassword ? "Hide password" : "Show password"}
+              >
+                {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+              </button>
+            </span>
+          </div>
+          <div className="login-help">
+            <button
+              className="login-text-link"
+              type="button"
+              onClick={() => setShowPasswordHelp(current => !current)}
+              aria-expanded={showPasswordHelp}
+            >
+              Forgot password?
+            </button>
+            {showPasswordHelp && (
+              <p className="login-password-help" role="status">
+                Password resets are managed by your workspace administrator. Contact them to restore access.
+              </p>
+            )}
+          </div>
+          <button className="login-submit" type="submit">Sign in</button>
+          <p className="login-access-note">Need access? Ask your workspace admin for an account.</p>
+          {error && <p className="error login-error" role="alert">{error}</p>}
+        </form>
+      </section>
     </main>
   );
 }
