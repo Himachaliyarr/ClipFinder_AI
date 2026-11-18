@@ -1030,6 +1030,57 @@ r.get('/clips/:clipId/render', auth, wrap(async (req, res) => {
   await Activity.create({ user: req.user.id, action: 'render_accessed', entityType: 'Clip', entityId: clip._id, details: { renderVersion: clip.renderVersion } });
   res.type('mp4').sendFile(resolved, err => { if (err && !res.headersSent) res.status(404).json({ error: 'Rendered file not found' }); });
 }));
+r.delete('/clips/:clipId/render', auth, allow('admin','editor'), wrap(async (req, res) => {
+  if (!validId(req.params.clipId)) return res.status(400).json({ error: 'Invalid clip id' });
+  const clip = await Clip.findById(req.params.clipId);
+  if (!clip) return res.status(404).json({ error: 'Clip not found' });
+  if (['queued','processing'].includes(clip.renderStatus)) {
+    return res.status(409).json({ error: 'Wait for rendering to finish before deleting this clip render' });
+  }
+  if (!clip.renderPath && !['failed','completed'].includes(clip.renderStatus)) {
+    return res.status(404).json({ error: 'No render result to delete' });
+  }
+
+  const rootPath = path.resolve(root);
+  let fileRemoved = false;
+  if (clip.renderPath) {
+    const resolved = path.resolve(clip.renderPath);
+    if (!resolved.startsWith(`${rootPath}${path.sep}`)) return res.status(403).json({ error: 'Invalid render path' });
+    try {
+      const realRoot = await fs.promises.realpath(rootPath);
+      const realRenderPath = await fs.promises.realpath(resolved);
+      if (!realRenderPath.startsWith(`${realRoot}${path.sep}`)) {
+        return res.status(403).json({ error: 'Invalid render path' });
+      }
+      const stat = await fs.promises.stat(realRenderPath);
+      if (!stat.isFile()) return res.status(409).json({ error: 'Rendered media path is not a file' });
+      await fs.promises.unlink(realRenderPath);
+      fileRemoved = true;
+    } catch (error) {
+      if (error.code !== 'ENOENT') throw error;
+    }
+  }
+
+  const renderVersion = clip.renderVersion;
+  clip.renderPath = undefined;
+  clip.renderJobId = undefined;
+  clip.renderStatus = 'idle';
+  clip.renderProgress = 0;
+  clip.renderError = undefined;
+  if (clip.status === 'rendered') clip.status = 'approved';
+  await clip.save();
+  await Activity.create({
+    user: req.user.id,
+    action: 'render_deleted',
+    entityType: 'Clip',
+    entityId: clip._id,
+    details: { renderVersion, fileRemoved },
+  });
+  res.json({
+    message: fileRemoved ? 'Rendered video deleted' : 'Failed render cleared',
+    clip: publicClip(clip),
+  });
+}));
 r.get('/:id/transcript', auth, wrap(async (req, res) => { if (!validId(req.params.id)) return res.status(400).json({ error: 'Invalid podcast id' }); const p = await Podcast.findById(req.params.id).select('transcript segments language'); if (!p) return res.status(404).json({ error: 'Not found' }); res.json(p); }));
 r.patch('/:id/transcript', auth, allow('admin','editor'), wrap(async (req, res) => {
   if (!validId(req.params.id)) return res.status(400).json({ error: 'Invalid podcast id' });

@@ -801,8 +801,10 @@ export default function App() {
     try {
       const clip = (await api.patch(`/podcasts/clips/${id}`, patch)).data;
       setClips(old => old.map(item => item._id === id ? clip : item));
+      return true;
     } catch (e) {
       setError(e.response?.data?.error || 'Could not save clip changes');
+      return false;
     }
   }
 
@@ -851,10 +853,10 @@ export default function App() {
   async function previewClip(id) {
     try {
       const response = await api.get(`/podcasts/clips/${id}/render`, { responseType: 'blob' });
-      const url = URL.createObjectURL(response.data);
-      window.open(url, '_blank', 'noopener,noreferrer');
+      return URL.createObjectURL(response.data);
     } catch (e) {
       setError(e.response?.data?.error || 'Rendered preview unavailable');
+      return null;
     }
   }
 
@@ -871,6 +873,20 @@ export default function App() {
       URL.revokeObjectURL(url);
     } catch (e) {
       setError(e.response?.data?.error || 'Rendered download unavailable');
+    }
+  }
+
+  async function deleteRenderedClip(id) {
+    if (!window.confirm('Remove this render from the workspace? The reel suggestion will remain, and any saved rendered video will be deleted.')) return;
+    setBusy(true);
+    try {
+      const { data } = await api.delete(`/podcasts/clips/${id}/render`);
+      setError(data.message || 'Rendered video deleted.');
+      await refresh();
+    } catch (e) {
+      setError(e.response?.data?.error || 'Rendered video could not be deleted');
+    } finally {
+      setBusy(false);
     }
   }
 
@@ -1079,6 +1095,7 @@ export default function App() {
               closeSourcePreview,
               previewClip,
               downloadClip,
+              deleteRenderedClip,
             }}
           />
         ) : null}

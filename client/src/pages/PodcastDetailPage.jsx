@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { CheckCircle } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { CheckCircle, PlayCircle, Trash2 } from 'lucide-react';
 import { formatTranscriptTimestamp, getTranscriptLinesInRange } from '../utils/transcript.js';
 import PodcastJobProgress, {
   canRestartPodcastJob,
@@ -46,6 +46,7 @@ export default function PodcastDetailPage({ data, actions }) {
     renderClip,
     previewClip,
     downloadClip,
+    deleteRenderedClip,
     saveTranscript,
     exportClipMetadata,
     exportStoryMetadata,
@@ -59,11 +60,69 @@ export default function PodcastDetailPage({ data, actions }) {
   const [selectedStoryIndexes, setSelectedStoryIndexes] = useState([]);
   const [clipStatusFilter, setClipStatusFilter] = useState('all');
   const [clipAssigneeFilter, setClipAssigneeFilter] = useState('all');
+  const [selectedClipIds, setSelectedClipIds] = useState([]);
+  const [focusedTranscriptTime, setFocusedTranscriptTime] = useState(null);
+  const [focusedClipId, setFocusedClipId] = useState(null);
+  const [renderedPreviewUrl, setRenderedPreviewUrl] = useState(null);
   const filteredClips = clips.filter(clip => {
     const assignedTo = clip.assignedTo?._id || clip.assignedTo?.id || clip.assignedTo || '';
     return (clipStatusFilter === 'all' || clip.status === clipStatusFilter)
       && (clipAssigneeFilter === 'all' || (clipAssigneeFilter === 'unassigned' ? !assignedTo : String(assignedTo) === clipAssigneeFilter));
   });
+  const hasSource = Boolean(selected?.sourceUrl || selected?.sourceFiles?.length);
+  const momentsReady = Boolean(selected?.storyMoments?.length);
+  const needsReview = clips.filter(clip => clip.status === 'suggested').length;
+  const renderedClips = clips.filter(clip => clip.renderStatus === 'completed');
+  const sourceVideos = (selected?.sourceFiles || []).filter(file => file.kind === 'video');
+  const allVisibleClipsSelected = filteredClips.length > 0
+    && filteredClips.every(clip => selectedClipIds.includes(clip._id));
+  const workflowSteps = [
+    { id: 'upload', label: 'Upload', complete: hasSource, target: 'source-upload' },
+    { id: 'transcript', label: 'Transcribe', complete: hasTranscript, tab: 'transcript' },
+    { id: 'stories', label: 'Review moments', complete: momentsReady, tab: 'stories' },
+    { id: 'clips', label: 'Approve reels', complete: clips.length > 0 && needsReview === 0, tab: 'clips' },
+    { id: 'generated', label: 'Export', complete: renderedClips.length > 0 || Boolean(selected?.opusClipClips?.length), tab: 'generated' },
+  ];
+  const currentWorkflowStep = workflowSteps.find(step => !step.complete)?.id || 'generated';
+  useEffect(() => () => {
+    if (renderedPreviewUrl) URL.revokeObjectURL(renderedPreviewUrl);
+  }, [renderedPreviewUrl]);
+  useEffect(() => {
+    if (activeTab !== 'clips' || !focusedClipId) return undefined;
+    const frame = window.requestAnimationFrame(() => {
+      document.querySelector(`[data-clip-id="${focusedClipId}"]`)
+        ?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [activeTab, focusedClipId]);
+  async function openRenderedPreview(clipId) {
+    const url = await previewClip(clipId);
+    if (url) setRenderedPreviewUrl(url);
+  }
+  function findClipForRange(line) {
+    return clips.find(clip => Number(clip.start) <= line.end && Number(clip.end) >= line.start);
+  }
+  function jumpToReelSuggestion(line) {
+    const clip = findClipForRange(line);
+    if (!clip) return;
+    setClipStatusFilter('all');
+    setClipAssigneeFilter('all');
+    setFocusedClipId(clip._id);
+    setActiveTab('clips');
+  }
+  function navigateWorkflowStep(step) {
+    if (step.tab) setActiveTab(step.tab);
+    if (step.target) document.getElementById(step.target)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }
+  function jumpToTranscript(clip) {
+    setFocusedTranscriptTime(clip.start);
+    setOpenTranscriptFor(selected?._id);
+    setActiveTab('transcript');
+  }
+  async function updateSelectedClips(status) {
+    const updated = await Promise.all(selectedClipIds.map(id => updateClip(id, { status })));
+    if (updated.every(Boolean)) setSelectedClipIds([]);
+  }
   function openReelStoryPicker() {
     setSelectedStoryIndexes((selected?.storyMoments || []).map((_, index) => index).slice(0, 8));
     setShowReelStoryPicker(true);
@@ -82,7 +141,7 @@ export default function PodcastDetailPage({ data, actions }) {
     { id: 'transcript', label: 'Transcript' },
     { id: 'stories', label: `Story moments (${selected?.storyMoments?.length || 0})` },
     { id: 'clips', label: `Reel suggestions (${clips.length})` },
-    { id: 'generated', label: `Generated reels (${selected?.opusClipClips?.length || 0})` },
+    { id: 'generated', label: `Exports (${renderedClips.length + (selected?.opusClipClips?.length || 0)})` },
   ];
 
   function handleTabKeyDown(event) {
@@ -152,7 +211,24 @@ export default function PodcastDetailPage({ data, actions }) {
           </>
         )}
       </section>
-      <section className="create sourceupload">
+      <nav className="workflow-stepper" aria-label="Podcast production workflow">
+        {workflowSteps.map((step, index) => {
+          const current = step.id === currentWorkflowStep;
+          return (
+            <button
+              type="button"
+              key={step.id}
+              className={`workflow-step${step.complete ? ' complete' : ''}${current ? ' current' : ''}`}
+              aria-current={current ? 'step' : undefined}
+              onClick={() => navigateWorkflowStep(step)}
+            >
+              <span className="workflow-step-number">{step.complete ? <CheckCircle size={16} /> : index + 1}</span>
+              <span><strong>{step.label}</strong><small>{step.complete ? 'Complete' : current ? 'Next step' : 'Upcoming'}</small></span>
+            </button>
+          );
+        })}
+      </nav>
+      <section className="create sourceupload" id="source-upload">
         <div>
           <h3>Add camera / audio track</h3>
           <p className="muted">Upload one speaker camera at a time and assign its stable key.</p>
@@ -171,6 +247,19 @@ export default function PodcastDetailPage({ data, actions }) {
           <div className="upload-transfer-progress" role="status" aria-live="polite">
             <span>Uploading {uploadProgress.fileName} · {Math.floor(uploadProgress.loaded / 1024 ** 2)} / {Math.ceil(uploadProgress.total / 1024 ** 2)} MiB</span>
             <progress max={uploadProgress.total} value={uploadProgress.loaded} />
+          </div>
+        )}
+        {selected?.sourceFiles?.length > 0 && (
+          <div className="source-assets" aria-label="Uploaded source assets">
+            <strong>Project sources</strong>
+            {selected.sourceFiles.map((file, index) => (
+              <div className="source-asset" key={`${file.originalName}-${index}`}>
+                <span>{file.kind === 'video' ? 'Camera video' : file.kind === 'mix' ? 'Master mix' : 'Speaker mic'}</span>
+                <span>{file.originalName || `Source ${index + 1}`}</span>
+                {file.speaker && <small>{file.speaker}</small>}
+                {Number.isFinite(file.size) && <small>{(file.size / 1024 ** 2).toFixed(1)} MiB</small>}
+              </div>
+            ))}
           </div>
         )}
       </section>
@@ -204,6 +293,14 @@ export default function PodcastDetailPage({ data, actions }) {
             setOpenTranscriptFor={setOpenTranscriptFor}
             saveTranscript={saveTranscript}
             savingTranscript={savingTranscript}
+            focusedTime={focusedTranscriptTime}
+            onPreviewRange={sourceVideos.length ? line => previewSourceClip({
+              title: 'Transcript source preview',
+              start: line.start,
+              end: line.end,
+            }) : null}
+            hasClipForRange={line => Boolean(findClipForRange(line))}
+            onFindReel={jumpToReelSuggestion}
           />
       </div>
       <div id="detail-panel-stories" className="detail-tab-panel" role="tabpanel" aria-labelledby="detail-tab-stories" tabIndex={0} hidden={activeTab !== 'stories'}>
@@ -330,23 +427,73 @@ export default function PodcastDetailPage({ data, actions }) {
               <button type="button" className="secondary" onClick={exportClipMetadata} disabled={!clips.length}>Export CSV</button>
             </div>
           </div>
+          {filteredClips.length > 0 && (
+            <div className="clip-bulk-actions">
+              <label className="clip-select-all">
+                <input
+                  type="checkbox"
+                  checked={allVisibleClipsSelected}
+                  onChange={() => setSelectedClipIds(current => (
+                    allVisibleClipsSelected
+                      ? current.filter(id => !filteredClips.some(clip => clip._id === id))
+                      : [...new Set([...current, ...filteredClips.map(clip => clip._id)])]
+                  ))}
+                />
+                Select visible ({filteredClips.length})
+              </label>
+              {selectedClipIds.length > 0 && (
+                <div className="clip-bulk-buttons" role="group" aria-label="Bulk review actions">
+                  <span>{selectedClipIds.length} selected</span>
+                  <button type="button" className="approve" onClick={() => updateSelectedClips('approved')} disabled={busy}>
+                    Approve selected
+                  </button>
+                  <button type="button" className="reject" onClick={() => updateSelectedClips('rejected')} disabled={busy}>
+                    Reject selected
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
           {!clips.length && <p className="muted">{selected?.transcript ? 'No reel suggestions are available yet.' : 'Transcribe the source to prepare reel suggestions.'}</p>}
           {clips.length > 0 && !filteredClips.length && <p className="muted">No clips match these filters.</p>}
           <div className="cliplist">
-            {filteredClips.map(clip => (
-              <article className="clip" key={clip._id}>
-                <div className="score">{clip.score}/10</div>
+            {filteredClips.map(clip => {
+              const transcriptExcerpt = getTranscriptLinesInRange(selected?.segments, clip.start, clip.end).slice(0, 2);
+              return (
+              <article className={`clip${focusedClipId === clip._id ? ' clip-focused' : ''}`} data-clip-id={clip._id} key={clip._id}>
+                <div className="clip-card-meta">
+                  <label className="clip-select" onClick={event => event.stopPropagation()}>
+                    <input
+                      type="checkbox"
+                      aria-label={`Select ${clip.title}`}
+                      checked={selectedClipIds.includes(clip._id)}
+                      onChange={() => setSelectedClipIds(current => (
+                        current.includes(clip._id) ? current.filter(id => id !== clip._id) : [...current, clip._id]
+                      ))}
+                    />
+                  </label>
+                  <div className="score">{clip.score}/10</div>
+                </div>
                 <div className="clipbody">
                   <h3>{clip.title}</h3>
                   <p>{clip.hook}</p>
                   <p className="muted">{clip.start?.toFixed(1)}s – {clip.end?.toFixed(1)}s · {clip.reason}</p>
+                  {transcriptExcerpt.length > 0 && (
+                    <div className="clip-transcript-excerpt">
+                      <strong>From transcript</strong>
+                      {transcriptExcerpt.map((line, index) => (
+                        <p key={`${line.start}-${index}`}>{line.text}</p>
+                      ))}
+                    </div>
+                  )}
                   <div className="trimrow">
                     <label>In (sec)<input type="number" min="0" step="0.1" defaultValue={clip.start} onBlur={event => updateClip(clip._id, { start: Number(event.target.value) })} /></label>
                     <label>Out (sec)<input type="number" min="0.1" step="0.1" defaultValue={clip.end} onBlur={event => updateClip(clip._id, { end: Number(event.target.value) })} /></label>
                   </div>
                   {selected?.sourceFiles?.some(file => file.kind === 'video') && (
-                    <button className="secondary" type="button" onClick={() => previewSourceClip(clip)}>Preview source segment</button>
+                    <button className="secondary" type="button" onClick={() => previewSourceClip(clip)}><PlayCircle size={15} /> Preview clip</button>
                   )}
+                  <button className="secondary" type="button" onClick={() => jumpToTranscript(clip)}>View in transcript</button>
                   <label>Caption</label>
                   <textarea aria-label={`Caption for ${clip.title}`} defaultValue={clip.caption} onBlur={event => updateClip(clip._id, { caption: event.target.value })} />
                   <div className="trimrow performance">
@@ -358,12 +505,14 @@ export default function PodcastDetailPage({ data, actions }) {
                     {['approved', 'rendered'].includes(clip.status) && <button className="approve" onClick={() => updateClip(clip._id, { status: 'published' })}>Mark published</button>}
                     {clip.status !== 'published' && <button className="reject" onClick={() => updateClip(clip._id, { status: 'rejected' })}>Reject</button>}
                     <button className="secondary" onClick={() => editCameraPlan(clip)}>Camera plan</button>
-                    <button onClick={() => renderClip(clip._id, aspectRatio)} disabled={busy || ['queued', 'processing'].includes(clip.renderStatus)}>Render {aspectRatio}</button>
+                    <button onClick={() => renderClip(clip._id, aspectRatio)} disabled={busy || ['queued', 'processing'].includes(clip.renderStatus)}>
+                      {clip.renderStatus === 'completed' ? `Re-render ${aspectRatio}` : `Render ${aspectRatio}`}
+                    </button>
                     {['queued', 'processing'].includes(clip.renderStatus) && <span className="renderprogress">{clip.renderStatus} · {clip.renderProgress || 0}%</span>}
                     {clip.renderStatus === 'failed' && <span className="error">{clip.renderError || 'Render failed'}</span>}
                     {clip.renderStatus === 'completed' && (
                       <>
-                        <button className="secondary" onClick={() => previewClip(clip._id)}>Preview render</button>
+                        <button className="secondary" onClick={() => openRenderedPreview(clip._id)}>Preview render</button>
                         <button className="secondary" onClick={() => downloadClip(clip._id)}>Download MP4</button>
                       </>
                     )}
@@ -380,10 +529,67 @@ export default function PodcastDetailPage({ data, actions }) {
                 </div>
                 <span className={`status ${clip.status}`}>{clip.status === 'suggested' ? 'Needs review' : clip.status}</span>
               </article>
-            ))}
+              );
+            })}
           </div>
       </div>
       <div id="detail-panel-generated" className="detail-tab-panel" role="tabpanel" aria-labelledby="detail-tab-generated" tabIndex={0} hidden={activeTab !== 'generated'}>
+          <section className="opusclip-results rendered-results">
+            <div className="rendered-results-heading">
+              <div>
+                <h3>Rendered clips ({clips.filter(clip => clip.renderStatus && clip.renderStatus !== 'idle').length})</h3>
+                <p className="muted">Preview, download, or re-render locally generated clips.</p>
+              </div>
+              <label>
+                <span>Output format</span>
+                <select value={aspectRatio} onChange={event => setAspectRatio(event.target.value)} aria-label="Rendered clip output format">
+                  <option value="9:16">Portrait (9:16)</option>
+                  <option value="1:1">Square (1:1)</option>
+                  <option value="16:9">Landscape (16:9)</option>
+                </select>
+              </label>
+            </div>
+            {clips.some(clip => clip.renderStatus && clip.renderStatus !== 'idle') ? (
+              <div className="opusclip-grid">
+                {clips.filter(clip => clip.renderStatus && clip.renderStatus !== 'idle').map(clip => (
+                  <article className="opusclip-card generated-render-card" key={clip._id}>
+                    <div className="generated-render-heading">
+                      <h4>{clip.title}</h4>
+                      <span className={`status ${clip.renderStatus}`}>{clip.renderStatus}</span>
+                    </div>
+                    <p className="muted">{(clip.end - clip.start).toFixed(1)}s · {aspectRatio}</p>
+                    {['queued', 'processing'].includes(clip.renderStatus) && (
+                      <div className="rendered-progress">
+                        <span>{clip.renderStatus} · {clip.renderProgress || 0}%</span>
+                        <progress max="100" value={clip.renderProgress || 0} />
+                      </div>
+                    )}
+                    {clip.renderStatus === 'failed' && <p className="error">{clip.renderError || 'Render failed'}</p>}
+                    <div className="opusclip-actions">
+                      {clip.renderStatus === 'completed' && (
+                        <>
+                          <button className="secondary" type="button" onClick={() => openRenderedPreview(clip._id)}>Preview</button>
+                          <button className="secondary" type="button" onClick={() => downloadClip(clip._id)}>Download MP4</button>
+                        </>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => renderClip(clip._id, aspectRatio)}
+                        disabled={busy || ['queued', 'processing'].includes(clip.renderStatus)}
+                      >
+                        {clip.renderStatus === 'completed' ? 'Re-render' : 'Render'}
+                      </button>
+                      {['completed', 'failed'].includes(clip.renderStatus) && (
+                        <button className="reject" type="button" onClick={() => deleteRenderedClip(clip._id)} disabled={busy}>
+                          <Trash2 size={15} /> Delete render
+                        </button>
+                      )}
+                    </div>
+                  </article>
+                ))}
+              </div>
+            ) : <p className="muted empty-inline">No locally rendered clips yet. Approve a suggestion and render it to get started.</p>}
+          </section>
           {selected?.opusClipStatus && selected.opusClipStatus !== 'idle' ? (
             <section className="opusclip-results">
               <h3>Generated reels ({selected.opusClipClips?.length || 0})</h3>
@@ -408,19 +614,23 @@ export default function PodcastDetailPage({ data, actions }) {
                 <div className="opusclip-grid">
                   {selected.opusClipClips.map((opusClip, index) => (
                     <article className="opusclip-card" key={opusClip.id || index}>
+                      {opusClip.uriForPreview && (
+                        <video className="opusclip-preview" controls preload="metadata" src={opusClip.uriForPreview}>
+                          Your browser does not support video playback.
+                        </video>
+                      )}
                       <h4>{opusClip.title || `Reel ${index + 1}`}</h4>
                       {opusClip.durationMs && <small className="muted">{(opusClip.durationMs / 1000).toFixed(1)}s</small>}
                       {opusClip.text && <p>{opusClip.text}</p>}
                       <div className="opusclip-actions">
-                        {opusClip.uriForPreview && <a className="secondary" href={opusClip.uriForPreview} target="_blank" rel="noreferrer">Preview</a>}
-                        {opusClip.uriForExport && <a className="secondary" href={opusClip.uriForExport} target="_blank" rel="noreferrer">Download</a>}
+                        {opusClip.uriForExport && <a className="secondary" href={opusClip.uriForExport} target="_blank" rel="noreferrer">Open export</a>}
                       </div>
                     </article>
                   ))}
                 </div>
               ) : !hasOpusClipJob && <p className="muted empty-inline">No reels are available yet.</p>}
             </section>
-          ) : (
+          ) : renderedClips.length === 0 ? (
             <div className="empty-state">
               <h3>No generated reels yet</h3>
               <p className="muted">Generate Reels from a YouTube source or uploaded video.</p>
@@ -428,7 +638,7 @@ export default function PodcastDetailPage({ data, actions }) {
                 Generate Reels
               </button>
             </div>
-          )}
+          ) : null}
         </div>
       {previewSource && (
         <div className="clip-preview-backdrop" role="presentation" onClick={closeSourcePreview}>
@@ -448,6 +658,17 @@ export default function PodcastDetailPage({ data, actions }) {
               }}
             />
             <p className="muted">Previewing {previewSource.start.toFixed(1)}–{previewSource.end.toFixed(1)} seconds from the source.</p>
+          </section>
+        </div>
+      )}
+      {renderedPreviewUrl && (
+        <div className="clip-preview-backdrop" role="presentation" onClick={() => setRenderedPreviewUrl(null)}>
+          <section className="clip-preview-modal rendered-preview-modal" role="dialog" aria-modal="true" aria-label="Rendered clip preview" onClick={event => event.stopPropagation()}>
+            <div className="clip-preview-header">
+              <h3>Rendered clip preview</h3>
+              <button type="button" className="secondary" onClick={() => setRenderedPreviewUrl(null)}>Close preview</button>
+            </div>
+            <video src={renderedPreviewUrl} controls autoPlay />
           </section>
         </div>
       )}

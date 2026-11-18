@@ -19,6 +19,10 @@ export default function TranscriptPanel({
   setOpenTranscriptFor,
   saveTranscript,
   savingTranscript,
+  focusedTime,
+  onPreviewRange,
+  hasClipForRange,
+  onFindReel,
 }) {
   const [editing, setEditing] = useState(false);
   const [draftLines, setDraftLines] = useState([]);
@@ -29,10 +33,20 @@ export default function TranscriptPanel({
   const failedDraftKeyRef = useRef(null);
   const autosaveTimerRef = useRef(null);
   const autosaveInFlightRef = useRef(false);
+  const transcriptContentRef = useRef(null);
 
   useEffect(() => {
     saveTranscriptRef.current = saveTranscript;
   }, [saveTranscript]);
+
+  useEffect(() => {
+    if (!transcriptVisible || !Number.isFinite(focusedTime) || !transcriptContentRef.current) return;
+    const lineIndex = transcriptLines.findIndex(line => focusedTime >= line.start && focusedTime <= line.end);
+    if (lineIndex < 0) return;
+    transcriptContentRef.current
+      .querySelector(`[data-transcript-index="${lineIndex}"]`)
+      ?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  }, [focusedTime, transcriptLines, transcriptVisible]);
 
   useEffect(() => {
     if (!editing || savingTranscript || !lastSavedPayloadRef.current) return undefined;
@@ -180,15 +194,41 @@ export default function TranscriptPanel({
           )}
         </div>
       ) : transcriptVisible ? (
-        <div id="generated-transcript-content" className="transcript-content">
+        <div id="generated-transcript-content" className="transcript-content" ref={transcriptContentRef}>
           {transcriptLines.length ? (
             <div className="transcript-lines">
               {transcriptLines.map((line, index) => (
-                <div className="transcript-line" key={`${line.start}-${index}`}>
-                  <span className="transcript-timestamp">
-                    {formatTranscriptTimestamp(line.start)} – {formatTranscriptTimestamp(line.end)}
+                <div
+                  className={`transcript-line${Number.isFinite(focusedTime) && focusedTime >= line.start && focusedTime <= line.end ? ' transcript-line-focused' : ''}`}
+                  data-transcript-index={index}
+                  key={`${line.start}-${index}`}
+                >
+                  {onPreviewRange ? (
+                    <button
+                      type="button"
+                      className="transcript-timestamp transcript-timestamp-button"
+                      onClick={() => onPreviewRange(line)}
+                      aria-label={`Preview source from ${formatTranscriptTimestamp(line.start)} to ${formatTranscriptTimestamp(line.end)}`}
+                    >
+                      {formatTranscriptTimestamp(line.start)} – {formatTranscriptTimestamp(line.end)}
+                    </button>
+                  ) : (
+                    <span className="transcript-timestamp">
+                      {formatTranscriptTimestamp(line.start)} – {formatTranscriptTimestamp(line.end)}
+                    </span>
+                  )}
+                  <span className="transcript-text">
+                    {line.text}
+                    {hasClipForRange?.(line) && onFindReel && (
+                      <button
+                        type="button"
+                        className="transcript-reel-link"
+                        onClick={() => onFindReel(line)}
+                      >
+                        View reel suggestion
+                      </button>
+                    )}
                   </span>
-                  <span className="transcript-text">{line.text}</span>
                 </div>
               ))}
             </div>
