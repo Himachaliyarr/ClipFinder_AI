@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { CheckCircle, PlayCircle, Trash2 } from 'lucide-react';
 import { formatTranscriptTimestamp, getTranscriptLinesInRange } from '../utils/transcript.js';
 import PodcastJobProgress, {
@@ -61,9 +61,12 @@ export default function PodcastDetailPage({ data, actions }) {
   const [clipStatusFilter, setClipStatusFilter] = useState('all');
   const [clipAssigneeFilter, setClipAssigneeFilter] = useState('all');
   const [selectedClipIds, setSelectedClipIds] = useState([]);
+  const [expandedTranscriptClips, setExpandedTranscriptClips] = useState([]);
+  const [clipSaveStates, setClipSaveStates] = useState({});
   const [focusedTranscriptTime, setFocusedTranscriptTime] = useState(null);
   const [focusedClipId, setFocusedClipId] = useState(null);
   const [renderedPreviewUrl, setRenderedPreviewUrl] = useState(null);
+  const clipSaveTimers = useRef(new Map());
   const filteredClips = clips.filter(clip => {
     const assignedTo = clip.assignedTo?._id || clip.assignedTo?.id || clip.assignedTo || '';
     return (clipStatusFilter === 'all' || clip.status === clipStatusFilter)
@@ -87,6 +90,9 @@ export default function PodcastDetailPage({ data, actions }) {
   useEffect(() => () => {
     if (renderedPreviewUrl) URL.revokeObjectURL(renderedPreviewUrl);
   }, [renderedPreviewUrl]);
+  useEffect(() => () => {
+    clipSaveTimers.current.forEach(timer => window.clearTimeout(timer));
+  }, []);
   useEffect(() => {
     if (activeTab !== 'clips' || !focusedClipId) return undefined;
     const frame = window.requestAnimationFrame(() => {
@@ -122,6 +128,38 @@ export default function PodcastDetailPage({ data, actions }) {
   async function updateSelectedClips(status) {
     const updated = await Promise.all(selectedClipIds.map(id => updateClip(id, { status })));
     if (updated.every(Boolean)) setSelectedClipIds([]);
+  }
+  async function saveInlineClipEdit(clip, field, value) {
+    const previousValue = clip[field] ?? '';
+    const nextValue = field === 'caption' ? String(value) : Number(value);
+    const currentValue = field === 'caption' ? String(previousValue) : Number(previousValue);
+    if (Object.is(nextValue, currentValue)) return;
+
+    const timerKey = `${clip._id}:${field}`;
+    window.clearTimeout(clipSaveTimers.current.get(timerKey));
+    setClipSaveStates(current => ({
+      ...current,
+      [clip._id]: { ...current[clip._id], [field]: 'saving' },
+    }));
+
+    const saved = await updateClip(clip._id, { [field]: nextValue });
+    setClipSaveStates(current => ({
+      ...current,
+      [clip._id]: { ...current[clip._id], [field]: saved ? 'saved' : 'failed' },
+    }));
+    if (saved) {
+      const timer = window.setTimeout(() => {
+        setClipSaveStates(current => {
+          if (current[clip._id]?.[field] !== 'saved') return current;
+          const next = { ...current, [clip._id]: { ...current[clip._id] } };
+          delete next[clip._id][field];
+          if (Object.keys(next[clip._id]).length === 0) delete next[clip._id];
+          return next;
+        });
+        clipSaveTimers.current.delete(timerKey);
+      }, 2200);
+      clipSaveTimers.current.set(timerKey, timer);
+    }
   }
   function openReelStoryPicker() {
     setSelectedStoryIndexes((selected?.storyMoments || []).map((_, index) => index).slice(0, 8));
@@ -458,7 +496,8 @@ export default function PodcastDetailPage({ data, actions }) {
           {clips.length > 0 && !filteredClips.length && <p className="muted">No clips match these filters.</p>}
           <div className="cliplist">
             {filteredClips.map(clip => {
-              const transcriptExcerpt = getTranscriptLinesInRange(selected?.segments, clip.start, clip.end).slice(0, 2);
+              const transcriptExcerpt = getTranscriptLinesInRange(selected?.segments, clip.start, clip.end);
+              const isExcerptExpanded = expandedTranscriptClips.includes(clip._id);
               return (
               <article className={`clip${focusedClipId === clip._id ? ' clip-focused' : ''}`} data-clip-id={clip._id} key={clip._id}>
                 <div className="clip-card-meta">
@@ -475,27 +514,60 @@ export default function PodcastDetailPage({ data, actions }) {
                   <div className="score">{clip.score}/10</div>
                 </div>
                 <div className="clipbody">
-                  <h3>{clip.title}</h3>
+                  <div className="clip-title-row">
+                    <h3>{clip.title}</h3>
+                    {sourceVideos.length > 0 && (
+                      <button className="secondary clip-preview-action" type="button" onClick={() => previewSourceClip(clip)}>
+                        <PlayCircle size={16} /> Preview clip
+                      </button>
+                    )}
+                  </div>
                   <p>{clip.hook}</p>
                   <p className="muted">{clip.start?.toFixed(1)}s – {clip.end?.toFixed(1)}s · {clip.reason}</p>
                   {transcriptExcerpt.length > 0 && (
                     <div className="clip-transcript-excerpt">
                       <strong>From transcript</strong>
-                      {transcriptExcerpt.map((line, index) => (
+                      {(isExcerptExpanded ? transcriptExcerpt : transcriptExcerpt.slice(0, 3)).map((line, index) => (
                         <p key={`${line.start}-${index}`}>{line.text}</p>
                       ))}
+                      {transcriptExcerpt.length > 3 && (
+                        <button
+                          className="clip-excerpt-toggle"
+                          type="button"
+                          aria-expanded={isExcerptExpanded}
+                          onClick={() => setExpandedTranscriptClips(current => (
+                            isExcerptExpanded
+                              ? current.filter(id => id !== clip._id)
+                              : [...current, clip._id]
+                          ))}
+                        >
+                          {isExcerptExpanded ? 'Show less' : 'Show more'}
+                        </button>
+                      )}
                     </div>
                   )}
                   <div className="trimrow">
-                    <label>In (sec)<input type="number" min="0" step="0.1" defaultValue={clip.start} onBlur={event => updateClip(clip._id, { start: Number(event.target.value) })} /></label>
-                    <label>Out (sec)<input type="number" min="0.1" step="0.1" defaultValue={clip.end} onBlur={event => updateClip(clip._id, { end: Number(event.target.value) })} /></label>
+                    <label>
+                      In (sec)
+                      <input type="number" min="0" step="0.1" defaultValue={clip.start} onBlur={event => saveInlineClipEdit(clip, 'start', event.target.value)} />
+                      <small className={`clip-save-state ${clipSaveStates[clip._id]?.start || ''}`} aria-live="polite">
+                        {clipSaveStates[clip._id]?.start === 'saving' ? 'Saving…' : clipSaveStates[clip._id]?.start === 'saved' ? 'Saved' : clipSaveStates[clip._id]?.start === 'failed' ? 'Could not save' : ''}
+                      </small>
+                    </label>
+                    <label>
+                      Out (sec)
+                      <input type="number" min="0.1" step="0.1" defaultValue={clip.end} onBlur={event => saveInlineClipEdit(clip, 'end', event.target.value)} />
+                      <small className={`clip-save-state ${clipSaveStates[clip._id]?.end || ''}`} aria-live="polite">
+                        {clipSaveStates[clip._id]?.end === 'saving' ? 'Saving…' : clipSaveStates[clip._id]?.end === 'saved' ? 'Saved' : clipSaveStates[clip._id]?.end === 'failed' ? 'Could not save' : ''}
+                      </small>
+                    </label>
                   </div>
-                  {selected?.sourceFiles?.some(file => file.kind === 'video') && (
-                    <button className="secondary" type="button" onClick={() => previewSourceClip(clip)}><PlayCircle size={15} /> Preview clip</button>
-                  )}
                   <button className="secondary" type="button" onClick={() => jumpToTranscript(clip)}>View in transcript</button>
                   <label>Caption</label>
-                  <textarea aria-label={`Caption for ${clip.title}`} defaultValue={clip.caption} onBlur={event => updateClip(clip._id, { caption: event.target.value })} />
+                  <textarea aria-label={`Caption for ${clip.title}`} defaultValue={clip.caption} onBlur={event => saveInlineClipEdit(clip, 'caption', event.target.value)} />
+                  <small className={`clip-save-state caption-save-state ${clipSaveStates[clip._id]?.caption || ''}`} aria-live="polite">
+                    {clipSaveStates[clip._id]?.caption === 'saving' ? 'Saving caption…' : clipSaveStates[clip._id]?.caption === 'saved' ? 'Caption saved' : clipSaveStates[clip._id]?.caption === 'failed' ? 'Caption could not be saved' : ''}
+                  </small>
                   <div className="trimrow performance">
                     <label>Published views<input type="number" min="0" step="1" defaultValue={clip.performance?.views ?? ''} onBlur={event => updateClip(clip._id, { performance: { views: Number(event.target.value || 0) } })} /></label>
                     <label>Average watch time (sec)<input type="number" min="0" step="0.1" defaultValue={clip.performance?.watchTime ?? ''} onBlur={event => updateClip(clip._id, { performance: { watchTime: Number(event.target.value || 0) } })} /></label>

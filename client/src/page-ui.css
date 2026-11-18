@@ -260,9 +260,13 @@
 .clip-library-heading,
 .clip-library-actions {
   display: flex;
-  align-items: end;
+  align-items: flex-start;
   justify-content: space-between;
   gap: 12px;
+}
+
+.clip-library-heading {
+  flex-wrap: wrap;
 }
 
 .clip-library-heading .sectiontitle {
@@ -270,14 +274,22 @@
 }
 
 .clip-library-actions {
+  flex: 1 1 100%;
+  width: 100%;
+  min-width: 0;
   flex-wrap: wrap;
-  justify-content: flex-end;
+  justify-content: flex-start;
   margin: 18px 0 15px;
 }
 
 .clip-library-actions label {
-  min-width: min(290px, 100%);
+  flex: 1 1 210px;
+  min-width: min(210px, 100%);
   margin: 0;
+}
+
+.clip-library-actions button {
+  align-self: flex-end;
 }
 
 .activity-heading {
@@ -1082,6 +1094,62 @@ a:focus-visible {
   line-height: 1.5;
 }
 
+.clip-excerpt-toggle {
+  margin-top: 6px;
+  padding: 3px 0;
+  color: #eac36e;
+  background: transparent;
+  box-shadow: none !important;
+  font-size: 11px;
+}
+
+.clip-excerpt-toggle:hover:not(:disabled) {
+  color: #f0cc75;
+  text-decoration: underline;
+  transform: none;
+}
+
+.clip-title-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.clip-title-row h3 {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.clip-preview-action {
+  flex: 0 0 auto;
+  padding: 8px 11px;
+}
+
+.clip-save-state {
+  display: block;
+  min-height: 14px;
+  color: #85878d;
+  font-size: 10px;
+  font-weight: 400;
+}
+
+.clip-save-state.saving {
+  color: #eac36e;
+}
+
+.clip-save-state.saved {
+  color: #9de0b0;
+}
+
+.clip-save-state.failed {
+  color: #ff9d9d;
+}
+
+.caption-save-state {
+  margin: -7px 0 9px;
+}
+
 .transcript-timestamp-button {
   width: max-content;
   justify-content: flex-start;
@@ -1219,6 +1287,22 @@ a:focus-visible {
   color: #4d5563;
 }
 
+.app[data-theme="light"] .clip-excerpt-toggle {
+  color: #81621e;
+}
+
+.app[data-theme="light"] .clip-save-state.saving {
+  color: #81621e;
+}
+
+.app[data-theme="light"] .clip-save-state.saved {
+  color: #287445;
+}
+
+.app[data-theme="light"] .clip-save-state.failed {
+  color: #a33b3b;
+}
+
 .app[data-theme="light"] .clip-transcript-excerpt {
   border-left-color: #c79b41;
 }
@@ -1278,5 +1362,15 @@ a:focus-visible {
   .clip-bulk-buttons button {
     flex: 1 1 100%;
     justify-content: center;
+  }
+
+  .clip-title-row {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .clip-preview-action {
+    align-self: flex-start;
   }
 }
