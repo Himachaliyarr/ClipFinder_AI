@@ -49,7 +49,16 @@ export default function App() {
   const [showWelcome, setShowWelcome] = useState(false);
   const [showBrandIntro, setShowBrandIntro] = useState(() => !localStorage.getItem('cf_token'));
   const [currentUser, setCurrentUser] = useState(null);
-  const [page, setPage] = useState('dashboard');
+  const [page, setPage] = useState(() => {
+    const savedPage = sessionStorage.getItem('cf_workspace_page');
+    const savedPodcastId = sessionStorage.getItem('cf_selected_podcast_id');
+    if (savedPage === 'detail' && savedPodcastId) return 'detail';
+    return ['dashboard', 'team'].includes(savedPage) ? savedPage : 'dashboard';
+  });
+  const [savedPodcastId] = useState(() => sessionStorage.getItem('cf_selected_podcast_id') || '');
+  const [restoringPodcast, setRestoringPodcast] = useState(() => Boolean(token && page === 'detail' && savedPodcastId));
+  const [restorePodcastError, setRestorePodcastError] = useState('');
+  const [restoreAttempt, setRestoreAttempt] = useState(0);
   const [podcasts, setPodcasts] = useState([]);
   const [podcastsLoaded, setPodcastsLoaded] = useState(false);
   const [podcastsLoadError, setPodcastsLoadError] = useState('');
@@ -105,6 +114,15 @@ export default function App() {
   }, [theme]);
 
   useEffect(() => {
+    sessionStorage.setItem('cf_workspace_page', page);
+    if (page === 'detail') {
+      if (selected?._id) sessionStorage.setItem('cf_selected_podcast_id', selected._id);
+    } else {
+      sessionStorage.removeItem('cf_selected_podcast_id');
+    }
+  }, [page, selected?._id]);
+
+  useEffect(() => {
     if (!showWelcome) return undefined;
     const timer = setTimeout(() => setShowWelcome(false), 1500);
     return () => clearTimeout(timer);
@@ -135,6 +153,27 @@ export default function App() {
       setError(e.response?.data?.error || 'Could not load the signed-in user');
     });
   }, [token]);
+
+  useEffect(() => {
+    if (!token || page !== 'detail' || selected?._id || !savedPodcastId) return undefined;
+    let active = true;
+    setRestoringPodcast(true);
+    setRestorePodcastError('');
+    Promise.all([
+      api.get(`/podcasts/${savedPodcastId}`),
+      api.get(`/podcasts/${savedPodcastId}/clips`),
+    ]).then(([detail, podcastClips]) => {
+      if (!active) return;
+      setSelected(detail.data);
+      setClips(podcastClips.data);
+    }).catch(e => {
+      if (!active) return;
+      setRestorePodcastError(e.response?.data?.error || 'Could not restore this podcast workspace.');
+    }).finally(() => {
+      if (active) setRestoringPodcast(false);
+    });
+    return () => { active = false; };
+  }, [token, page, selected?._id, savedPodcastId, restoreAttempt]);
 
   useEffect(() => {
     if (!token) return undefined;
@@ -363,6 +402,10 @@ export default function App() {
     if (token && page === 'dashboard') loadMetrics();
     if (token && page === 'team' && currentUser?.role === 'admin') loadTeam();
   }, [token, page, currentUser?.role]);
+
+  useEffect(() => {
+    if (page === 'team' && currentUser && currentUser.role !== 'admin') setPage('dashboard');
+  }, [page, currentUser]);
 
   const hasActivePodcastJobs = podcasts.some(podcast => isPodcastJobActive(podcast.status));
   useEffect(() => {
@@ -1050,6 +1093,19 @@ export default function App() {
               restartPodcastJob,
             }}
           />
+        ) : page === 'detail' && !selected ? (
+          <section className="empty-state workspace-restore-state" role="status" aria-live="polite">
+            <h3>{restorePodcastError ? 'Could not reopen podcast' : 'Restoring podcast workspace…'}</h3>
+            {restorePodcastError && <p className="muted">{restorePodcastError}</p>}
+            {restorePodcastError && (
+              <div className="workspace-restore-actions">
+                <button type="button" className="secondary" onClick={() => setRestoreAttempt(attempt => attempt + 1)}>
+                  Retry
+                </button>
+                <button type="button" onClick={() => setPage('dashboard')}>Back to podcasts</button>
+              </div>
+            )}
+          </section>
         ) : page === 'detail' ? (
           <PodcastDetailPage
             key={selected?._id || 'podcast-detail'}

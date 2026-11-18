@@ -636,6 +636,13 @@
   text-decoration: none;
 }
 
+.workspace-restore-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+}
+
 .empty-inline {
   margin: 16px 0 0;
   line-height: 1.6;
