@@ -864,7 +864,7 @@ export default function App() {
   async function renderClip(id, aspectRatio = '9:16') {
     setBusy(true);
     try {
-      await api.post(`/podcasts/clips/${id}/render`, { brandText: 'VANDE DIGITAL', aspectRatio });
+      await api.post(`/podcasts/clips/${id}/render`, { aspectRatio });
       setError('Render queued. Progress will update here.');
       await refresh();
     } catch (e) {

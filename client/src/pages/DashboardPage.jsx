@@ -66,7 +66,7 @@ export default function DashboardPage({ data, actions }) {
           <div>
             <span className="eyebrow">START A PROJECT</span>
             <h3 id="new-podcast-heading">New podcast</h3>
-            <p className="muted">Upload a media file or paste a YouTube link to transcribe audio without saving YouTube media locally.</p>
+            <p className="muted">Upload a video or paste a YouTube link. YouTube video is downloaded only when you render a clip.</p>
             {uploadLimits && (
               <p className="muted">Upload limit: {uploadLimits.maxFiles} files per request, up to {Math.ceil((uploadLimits.maxResumableFileBytes || uploadLimits.maxFileBytes) / 1024 ** 3)} GiB each. Large files resume in chunks.</p>
             )}

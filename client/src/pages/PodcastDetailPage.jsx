@@ -669,7 +669,7 @@ export default function PodcastDetailPage({ data, actions }) {
                 {selected.opusClipStatus === 'completed'
                   ? 'Reels are ready.'
                   : selected.opusClipStatus === 'failed'
-                    ? 'Reel generation failed. Please try again.'
+                    ? selected.opusClipError || 'Reel generation failed. Please try again.'
                     : selected.opusClipStatus === 'cancelled'
                       ? 'Reel generation was stopped.'
                       : 'Reels are being generated...'}

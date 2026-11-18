@@ -4,7 +4,7 @@ import fs from 'node:fs/promises';
 import { Worker } from 'bullmq';
 import { connectDB } from '../config/db.js';
 import { Podcast, Clip, Activity } from '../models/index.js';
-import { connection, enqueueTranscription, enqueueStorySelection, enqueueOpusClipPoll, mediaJobCancellationKey, requestMediaJobCancellation } from '../queue.js';
+import { connection, enqueueTranscription, enqueueStorySelection, enqueueOpusClipPoll, mediaJobCancellationKey, mediaQueueName, requestMediaJobCancellation } from '../queue.js';
 import { transcribeLongAudio, transcribeYouTubeAudioStream } from '../services/deepgram.js';
 import { selectClips } from '../services/clipSelector.js';
 import { selectStories } from '../services/storySelector.js';
@@ -433,7 +433,7 @@ async function processMediaJob(job, signal) {
     clip.renderError=undefined;
     await clip.save();
     await job.updateProgress({ percent: 10, message: 'Preparing video render' });
-    const result=await renderClip({clip,podcast,settings:job.data.settings||{}});
+    const result=await renderClip({clip,podcast,settings:job.data.settings||{},signal});
     clip.renderPath=result.output;
     clip.renderVersion=(clip.renderVersion||0)+1;
     clip.renderSettings=job.data.settings||{};
@@ -448,7 +448,7 @@ async function processMediaJob(job, signal) {
   throw new Error(`Unknown job type: ${job.name}`);
 }
 
-const worker = new Worker('clipfinder-media', async job => {
+const worker = new Worker(mediaQueueName, async job => {
   const controller = new AbortController();
   const cancelKey = mediaJobCancellationKey(job.id);
   let checkingCancellation = false;

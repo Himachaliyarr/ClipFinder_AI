@@ -2,6 +2,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { nanoid } from 'nanoid';
+import { downloadYouTubeVideo } from './youtube.js';
 
 const run = (bin, args) => new Promise((resolve, reject) => {
   const child = spawn(bin, args, { stdio: ['ignore', 'ignore', 'pipe'] });
@@ -22,6 +23,52 @@ const assTime = seconds => {
   const cs = Math.max(0, Math.round(seconds * 100));
   return `${Math.floor(cs / 360000)}:${String(Math.floor(cs / 6000) % 60).padStart(2,'0')}:${String(Math.floor(cs / 100) % 60).padStart(2,'0')}.${String(cs % 100).padStart(2,'0')}`;
 };
+const youtubeDownloads = new Map();
+
+export async function resolveRenderSources(podcast, mediaRoot, signal, downloadVideo = downloadYouTubeVideo) {
+  const sources = [...(podcast.sourceFiles || [])];
+  if (sources.some(source => source.kind === 'video') || !podcast.sourceUrl) return sources;
+
+  const sourcePath = path.join(mediaRoot, String(podcast._id), 'youtube-source.mp4');
+  let source;
+  try {
+    source = await fs.stat(sourcePath);
+  } catch (error) {
+    if (error.code !== 'ENOENT') throw error;
+  }
+  if (source?.isFile() && source.size > 0) {
+    sources.push({ kind: 'video', path: sourcePath });
+    return sources;
+  }
+
+  const pending = youtubeDownloads.get(sourcePath);
+  if (pending) {
+    const downloadedPath = await pending;
+    sources.push({ kind: 'video', path: downloadedPath });
+    return sources;
+  }
+
+  const download = (async () => {
+    await fs.mkdir(path.dirname(sourcePath), { recursive: true });
+    const temporaryPath = `${sourcePath}.${nanoid(8)}.partial.mp4`;
+    try {
+      await downloadVideo(podcast.sourceUrl, temporaryPath, signal);
+      await fs.rename(temporaryPath, sourcePath);
+      return sourcePath;
+    } catch (error) {
+      await fs.rm(temporaryPath, { force: true });
+      throw error;
+    }
+  })();
+  youtubeDownloads.set(sourcePath, download);
+  try {
+    const downloadedPath = await download;
+    sources.push({ kind: 'video', path: downloadedPath });
+    return sources;
+  } finally {
+    if (youtubeDownloads.get(sourcePath) === download) youtubeDownloads.delete(sourcePath);
+  }
+}
 
 export function getRenderDimensions(aspectRatio = '9:16') {
   if (aspectRatio === '9:16') return { width: 1080, height: 1920 };
@@ -60,17 +107,17 @@ function buildAss(clip, settings, outPath, width, height) {
  * value matching sourceFiles[].speaker. The editor may provide a manual camera map;
  * otherwise the primary source is used for the whole clip.
  */
-export async function renderClip({ clip, podcast, settings = {} }) {
+export async function renderClip({ clip, podcast, settings = {}, signal }) {
   const { width, height } = getRenderDimensions(settings.aspectRatio);
   const mediaRoot = path.resolve(process.env.MEDIA_ROOT || './server/storage');
   const outputDir = path.join(mediaRoot, String(podcast._id), 'renders');
   await fs.mkdir(outputDir, { recursive: true });
   const output = path.join(outputDir, `${clip._id}-${Date.now()}-${nanoid(5)}.mp4`);
   const ass = path.join(outputDir, `${clip._id}-${nanoid(5)}.ass`);
-  const sources = podcast.sourceFiles || [];
-  if (!sources.length) throw new Error('Podcast has no source media');
   const start = Math.max(0, Number(clip.start) || 0), end = Number(clip.end);
   if (!Number.isFinite(end) || end <= start) throw new Error('Clip end must be greater than start');
+  const sources = await resolveRenderSources(podcast, mediaRoot, signal);
+  if (!sources.length) throw new Error('Podcast has no source media');
   const duration = end - start;
   const speakerFiles = new Map(sources.filter(s => s.speaker && s.kind !== 'audio' && s.kind !== 'mix').map(s => [s.speaker, s.path]));
   const primary = sources.find(s => s.kind === 'video');

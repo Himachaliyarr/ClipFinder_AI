@@ -1008,7 +1008,7 @@ r.post('/clips/:clipId/render', auth, allow('admin','editor'), wrap(async (req, 
   const aspectRatio = req.body?.aspectRatio ?? '9:16';
   if (!['9:16', '1:1', '16:9'].includes(aspectRatio)) return res.status(400).json({ error: 'Aspect ratio must be 9:16, 1:1, or 16:9' });
   const settings = {
-    brandText: String(req.body?.brandText || 'VANDE DIGITAL').slice(0,80),
+    brandText: String(req.body?.brandText ?? '').trim().slice(0,80),
     fontName: String(req.body?.fontName || 'Arial').replace(/[^\w -]/g,'').slice(0,40),
     primaryColour: req.body?.primaryColour || '&H00FFFFFF',
     accentColour: req.body?.accentColour || '&H00419BC7',

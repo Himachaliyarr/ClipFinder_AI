@@ -5,8 +5,9 @@ export const connection = new IORedis(process.env.REDIS_URL || 'redis://127.0.0.
   maxRetriesPerRequest: null,
   enableReadyCheck: true
 });
-export const mediaQueue = new Queue('clipfinder-media', { connection, defaultJobOptions: { removeOnComplete: 200, removeOnFail: 500 } });
-export const mediaJobCancellationKey = jobId => `clipfinder-media:cancel:${jobId}`;
+export const mediaQueueName = process.env.MEDIA_QUEUE_NAME || `clipfinder-media-${process.platform}`;
+export const mediaQueue = new Queue(mediaQueueName, { connection, defaultJobOptions: { removeOnComplete: 200, removeOnFail: 500 } });
+export const mediaJobCancellationKey = jobId => `${mediaQueueName}:cancel:${jobId}`;
 export async function requestMediaJobCancellation(job) {
   let state = await job.getState();
   if (['waiting', 'delayed', 'paused'].includes(state)) {

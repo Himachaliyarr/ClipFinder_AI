@@ -51,6 +51,7 @@ The worker creates an ASS subtitle file and burns it into the 1080x1920 output. 
 ## Production requirements and caveats
 
 - Install FFmpeg with libx264 and AAC support on every worker host; the default encoder is VideoToolbox on macOS and libx264 elsewhere. `FFMPEG_PATH` may point to a custom binary. When it is absolute, `ffprobe` defaults to the same directory; set `FFPROBE_PATH` to override it. Confirm the selected encoder is available on the target host.
+- The API and media worker must use the same `MEDIA_QUEUE_NAME`; by default it is platform-specific (`clipfinder-media-win32`, `clipfinder-media-darwin`, or `clipfinder-media-linux`) so workers on another OS cannot consume jobs with incompatible file paths. Set it explicitly only when all participating workers share compatible media storage.
 - Mount the same durable `MEDIA_ROOT` on API and worker processes. Store media on durable NAS/object storage in production; local ephemeral disks are not sufficient.
 - Camera cuts assume synchronized camera files and the same timeline origin. Audio is taken from an explicitly uploaded `kind=mix` master track when present, otherwise from the primary video. Isolated `kind=audio` mic tracks are used for transcription but are not automatically mixed into the final render.
 - Deepgram Nova-3 supplies word-level timing when available; Sarvam supplies a separate Hindi/multilingual transcript with phrase/chunk timing. Validate Hindi/Hinglish timing and transcription quality on authorized sample media before production use.
