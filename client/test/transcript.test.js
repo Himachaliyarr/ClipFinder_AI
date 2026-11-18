@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  formatClipTimecode,
   formatClipMetadataCsv,
   formatStoryMetadataCsv,
   formatStoryMetadataText,
@@ -10,7 +11,19 @@ import {
   formatTranscriptVtt,
   getTranscriptLines,
   getTranscriptLinesInRange,
+  parseClipTimecode,
 } from '../src/utils/transcript.js';
+
+test('formats clip boundaries as full timecodes and parses validated edits back to seconds', () => {
+  assert.equal(formatClipTimecode(2020), '00:33:40');
+  assert.equal(formatClipTimecode(2090.5), '00:34:50.5');
+  assert.equal(formatClipTimecode(3723.4), '01:02:03.4');
+  assert.equal(parseClipTimecode('00:33:40'), 2020);
+  assert.equal(parseClipTimecode('01:02:03.4'), 3723.4);
+  assert.equal(parseClipTimecode('00:60:00'), null);
+  assert.equal(parseClipTimecode('00:00:60'), null);
+  assert.equal(parseClipTimecode('2020'), null);
+});
 
 test('groups word timings by sentence and starts a new line when the speaker changes', () => {
   const lines = getTranscriptLines([

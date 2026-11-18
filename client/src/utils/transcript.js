@@ -10,6 +10,27 @@ export function formatTranscriptTimestamp(seconds) {
   return `${time}.${totalTenths % 10}`;
 }
 
+export function formatClipTimecode(seconds) {
+  const totalTenths = Math.round(Number(seconds) * 10);
+  const totalSeconds = Math.floor(totalTenths / 10);
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const wholeSeconds = totalSeconds % 60;
+  const tenths = totalTenths % 10;
+  const timecode = `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(wholeSeconds).padStart(2, '0')}`;
+  return tenths ? `${timecode}.${tenths}` : timecode;
+}
+
+export function parseClipTimecode(value) {
+  const match = /^(\d+):([0-5]\d):([0-5]\d)(?:\.(\d))?$/.exec(String(value).trim());
+  if (!match) return null;
+
+  const [, hoursText, minutesText, secondsText, tenthsText = '0'] = match;
+  const wholeSeconds = Number(hoursText) * 3600 + Number(minutesText) * 60 + Number(secondsText);
+  if (!Number.isSafeInteger(wholeSeconds)) return null;
+  return wholeSeconds + Number(`0.${tenthsText}`);
+}
+
 function formatSubtitleTimestamp(seconds, decimalSeparator) {
   const totalMilliseconds = Math.max(0, Math.round(Number(seconds) * 1000));
   const hours = Math.floor(totalMilliseconds / 3_600_000);

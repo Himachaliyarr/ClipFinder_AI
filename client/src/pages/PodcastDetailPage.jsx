@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { CheckCircle, PlayCircle, Trash2 } from 'lucide-react';
-import { formatTranscriptTimestamp, getTranscriptLinesInRange } from '../utils/transcript.js';
+import { formatClipTimecode, formatTranscriptTimestamp, getTranscriptLinesInRange, parseClipTimecode } from '../utils/transcript.js';
 import PodcastJobProgress, {
   canRestartPodcastJob,
   isPodcastJobActive,
@@ -160,6 +160,32 @@ export default function PodcastDetailPage({ data, actions }) {
       }, 2200);
       clipSaveTimers.current.set(timerKey, timer);
     }
+  }
+  function clearClipSaveState(clipId, field) {
+    setClipSaveStates(current => {
+      if (!current[clipId]?.[field]) return current;
+      const next = { ...current, [clipId]: { ...current[clipId] } };
+      delete next[clipId][field];
+      if (Object.keys(next[clipId]).length === 0) delete next[clipId];
+      return next;
+    });
+  }
+  function saveClipTimecodeEdit(clip, field, input) {
+    const nextValue = parseClipTimecode(input.value);
+    if (nextValue === null) {
+      setClipSaveStates(current => ({
+        ...current,
+        [clip._id]: { ...current[clip._id], [field]: 'invalid' },
+      }));
+      return;
+    }
+
+    input.value = formatClipTimecode(nextValue);
+    if (Object.is(nextValue, Number(clip[field]))) {
+      clearClipSaveState(clip._id, field);
+      return;
+    }
+    void saveInlineClipEdit(clip, field, nextValue);
   }
   function openReelStoryPicker() {
     setSelectedStoryIndexes((selected?.storyMoments || []).map((_, index) => index).slice(0, 8));
@@ -357,8 +383,8 @@ export default function PodcastDetailPage({ data, actions }) {
                           ? 'Finding story moments…'
                           : hasTranscript
                             ? selected?.sourceUrl && !selected?.sourceFiles?.length
-                              ? 'Generate story moments manually from this YouTube transcript.'
-                              : 'Story cards are generated automatically after transcription.'
+                              ? 'Click Find story moments above to generate story cards from this YouTube transcript.'
+                              : 'Click Find story moments above to generate story cards from this transcript.'
                             : 'Transcribe the source to find story moments.'}
                 </p>
                 {hasStoryMomentJob && (
@@ -523,7 +549,7 @@ export default function PodcastDetailPage({ data, actions }) {
                     )}
                   </div>
                   <p>{clip.hook}</p>
-                  <p className="muted">{clip.start?.toFixed(1)}s – {clip.end?.toFixed(1)}s · {clip.reason}</p>
+                  <p className="muted">{formatClipTimecode(clip.start)} – {formatClipTimecode(clip.end)} · {clip.reason}</p>
                   {transcriptExcerpt.length > 0 && (
                     <div className="clip-transcript-excerpt">
                       <strong>From transcript</strong>
@@ -548,17 +574,29 @@ export default function PodcastDetailPage({ data, actions }) {
                   )}
                   <div className="trimrow">
                     <label>
-                      In (sec)
-                      <input type="number" min="0" step="0.1" defaultValue={clip.start} onBlur={event => saveInlineClipEdit(clip, 'start', event.target.value)} />
+                      In (HH:MM:SS)
+                      <input
+                        type="text"
+                        placeholder="HH:MM:SS"
+                        defaultValue={formatClipTimecode(clip.start)}
+                        aria-invalid={clipSaveStates[clip._id]?.start === 'invalid'}
+                        onBlur={event => saveClipTimecodeEdit(clip, 'start', event.currentTarget)}
+                      />
                       <small className={`clip-save-state ${clipSaveStates[clip._id]?.start || ''}`} aria-live="polite">
-                        {clipSaveStates[clip._id]?.start === 'saving' ? 'Saving…' : clipSaveStates[clip._id]?.start === 'saved' ? 'Saved' : clipSaveStates[clip._id]?.start === 'failed' ? 'Could not save' : ''}
+                        {clipSaveStates[clip._id]?.start === 'invalid' ? 'Use HH:MM:SS, optionally with one decimal place.' : clipSaveStates[clip._id]?.start === 'saving' ? 'Saving…' : clipSaveStates[clip._id]?.start === 'saved' ? 'Saved' : clipSaveStates[clip._id]?.start === 'failed' ? 'Could not save' : ''}
                       </small>
                     </label>
                     <label>
-                      Out (sec)
-                      <input type="number" min="0.1" step="0.1" defaultValue={clip.end} onBlur={event => saveInlineClipEdit(clip, 'end', event.target.value)} />
+                      Out (HH:MM:SS)
+                      <input
+                        type="text"
+                        placeholder="HH:MM:SS"
+                        defaultValue={formatClipTimecode(clip.end)}
+                        aria-invalid={clipSaveStates[clip._id]?.end === 'invalid'}
+                        onBlur={event => saveClipTimecodeEdit(clip, 'end', event.currentTarget)}
+                      />
                       <small className={`clip-save-state ${clipSaveStates[clip._id]?.end || ''}`} aria-live="polite">
-                        {clipSaveStates[clip._id]?.end === 'saving' ? 'Saving…' : clipSaveStates[clip._id]?.end === 'saved' ? 'Saved' : clipSaveStates[clip._id]?.end === 'failed' ? 'Could not save' : ''}
+                        {clipSaveStates[clip._id]?.end === 'invalid' ? 'Use HH:MM:SS, optionally with one decimal place.' : clipSaveStates[clip._id]?.end === 'saving' ? 'Saving…' : clipSaveStates[clip._id]?.end === 'saved' ? 'Saved' : clipSaveStates[clip._id]?.end === 'failed' ? 'Could not save' : ''}
                       </small>
                     </label>
                   </div>

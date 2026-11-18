@@ -4,7 +4,7 @@ import fs from 'node:fs/promises';
 import { Worker } from 'bullmq';
 import { connectDB } from '../config/db.js';
 import { Podcast, Clip, Activity } from '../models/index.js';
-import { connection, enqueueTranscription, enqueueStorySelection, enqueueOpusClipPoll, mediaJobCancellationKey, mediaQueueName, requestMediaJobCancellation } from '../queue.js';
+import { connection, enqueueTranscription, enqueueOpusClipPoll, mediaJobCancellationKey, mediaQueueName, requestMediaJobCancellation } from '../queue.js';
 import { transcribeLongAudio, transcribeYouTubeAudioStream } from '../services/deepgram.js';
 import { selectClips } from '../services/clipSelector.js';
 import { selectStories } from '../services/storySelector.js';
@@ -239,44 +239,13 @@ async function processMediaJob(job, signal) {
         jobId: job.id,
         jobType: job.name,
         jobProgress: 75,
-        jobMessage: transcriptionMessage
+        jobMessage: transcriptionMessage,
+        storyMoments: [],
+        storyMomentsStatus: 'idle',
+        storyMomentsMessage: 'Click Find story moments to generate story cards.',
       },
       $unset: { storyMomentsError: 1 }
     });
-    assertJobRunning(signal);
-    const llmConfigured = Boolean(process.env.LLM_API_KEY);
-    await Podcast.findByIdAndUpdate(podcast._id, {
-      $set: {
-        storyMoments: [],
-        storyMomentsStatus: llmConfigured ? 'queued' : 'failed',
-        storyMomentsMessage: llmConfigured
-          ? 'Story selection queued'
-          : 'Story selection is temporarily unavailable',
-        ...(!llmConfigured ? { storyMomentsError: 'Story selection is temporarily unavailable' } : {})
-      },
-      ...(llmConfigured ? { $unset: { storyMomentsError: 1 } } : {})
-    });
-    if (llmConfigured) {
-      try {
-        assertJobRunning(signal);
-        await enqueueStorySelection(podcast.id, job.data.userId);
-      } catch (error) {
-        if (signal?.aborted) {
-          await Podcast.findByIdAndUpdate(podcast._id, {
-            $set: { storyMomentsStatus: 'idle', storyMomentsMessage: 'Story selection was not started' }
-          });
-        }
-        assertJobRunning(signal);
-        await Podcast.findByIdAndUpdate(podcast._id, {
-          $set: {
-            storyMomentsStatus: 'failed',
-            storyMomentsMessage: 'Could not queue story moment selection',
-            storyMomentsError: error.message.slice(0, 2000)
-          }
-        });
-        console.error('Could not queue story selection:', error.message);
-      }
-    }
     await job.updateProgress({ percent: 75, message: transcriptionMessage });
     return generateClipSuggestions({
       podcast,
