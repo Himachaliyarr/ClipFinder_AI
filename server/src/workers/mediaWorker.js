@@ -298,39 +298,52 @@ async function processMediaJob(job, signal) {
       $unset: { opusClipError: 1 }
     });
 
-    let moments = await Clip.find({
-      podcast: podcast._id,
-      status: { $in: ['suggested', 'approved', 'rendered', 'published'] }
-    })
-      .sort({ score: -1, updatedAt: -1 })
-      .limit(8)
-      .select('start end title hook caption reason')
-      .lean();
+    let openAiMoments = (podcast.opusClipOpenAiMoments || [])
+      .map(moment => ({
+        start: Number(moment.start),
+        end: Number(moment.end),
+        title: moment.title || '',
+        hook: moment.hook || '',
+        reason: moment.reason || ''
+      }))
+      .filter(moment => Number.isFinite(moment.start) && Number.isFinite(moment.end) && moment.end > moment.start)
+      .slice(0, 8);
 
-    if (!moments.length) {
-      const examples = await Clip.find({
-        podcast: { $ne: podcast._id },
-        status: { $in: ['approved', 'rendered', 'published'] }
+    if (!openAiMoments.length) {
+      let moments = await Clip.find({
+        podcast: podcast._id,
+        status: { $in: ['suggested', 'approved', 'rendered', 'published'] }
       })
-        .sort({ 'performance.views': -1, updatedAt: -1 })
-        .limit(20)
-        .select('title hook caption reason performance')
+        .sort({ score: -1, updatedAt: -1 })
+        .limit(8)
+        .select('start end title hook caption reason')
         .lean();
-      const selection = await selectClips(podcast.transcript, podcast.duration, examples, podcast.segments || []);
-      if (!selection.clips?.length) {
-        throw new Error(selection.warning || 'No reel moments were selected for OpusClip');
-      }
-      moments = selection.clips.slice(0, 8);
-      await Clip.insertMany(moments.map(moment => ({ ...moment, podcast: podcast._id })));
-    }
 
-    const openAiMoments = moments.map(moment => ({
-      start: Number(moment.start),
-      end: Number(moment.end),
-      title: moment.title || '',
-      hook: moment.hook || '',
-      reason: moment.reason || moment.caption || ''
-    }));
+      if (!moments.length) {
+        const examples = await Clip.find({
+          podcast: { $ne: podcast._id },
+          status: { $in: ['approved', 'rendered', 'published'] }
+        })
+          .sort({ 'performance.views': -1, updatedAt: -1 })
+          .limit(20)
+          .select('title hook caption reason performance')
+          .lean();
+        const selection = await selectClips(podcast.transcript, podcast.duration, examples, podcast.segments || []);
+        if (!selection.clips?.length) {
+          throw new Error(selection.warning || 'No reel moments were selected for OpusClip');
+        }
+        moments = selection.clips.slice(0, 8);
+        await Clip.insertMany(moments.map(moment => ({ ...moment, podcast: podcast._id })));
+      }
+
+      openAiMoments = moments.map(moment => ({
+        start: Number(moment.start),
+        end: Number(moment.end),
+        title: moment.title || '',
+        hook: moment.hook || '',
+        reason: moment.reason || moment.caption || ''
+      }));
+    }
     await Podcast.findByIdAndUpdate(podcast._id, {
       $set: {
         opusClipOpenAiMoments: openAiMoments,

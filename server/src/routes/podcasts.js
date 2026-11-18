@@ -399,6 +399,31 @@ r.post('/:id/opusclip', auth, allow('admin','editor'), wrap(async (req, res) => 
   if (!podcast.transcript || !podcast.duration) {
     return res.status(400).json({ error: 'Transcribe the podcast before starting reel generation' });
   }
+  let selectedStoryMoments = [];
+  if (Array.isArray(req.body?.storyIndexes)) {
+    const storyIndexes = [...new Set(req.body.storyIndexes)]
+      .filter(index => Number.isInteger(index) && index >= 0)
+      .slice(0, 8);
+    if (!storyIndexes.length) {
+      return res.status(400).json({ error: 'Select at least one story moment' });
+    }
+    if (storyIndexes.some(index => index >= (podcast.storyMoments || []).length)) {
+      return res.status(400).json({ error: 'A selected story moment is no longer available' });
+    }
+    selectedStoryMoments = storyIndexes.map(index => {
+      const story = podcast.storyMoments[index] || {};
+      return {
+        start: Number(story.start),
+        end: Number(story.end),
+        title: String(story.title || ''),
+        hook: String(story.summary || story.title || ''),
+        reason: String(story.reason || story.summary || story.excerpt || '')
+      };
+    }).filter(moment => Number.isFinite(moment.start) && Number.isFinite(moment.end) && moment.end > moment.start);
+    if (!selectedStoryMoments.length) {
+      return res.status(400).json({ error: 'Selected story moments do not have valid timestamps' });
+    }
+  }
   if (['queued','processing'].includes(podcast.opusClipStatus)) {
     return res.status(409).json({ error: 'OpusClip is already processing this podcast' });
   }
@@ -407,7 +432,7 @@ r.post('/:id/opusclip', auth, allow('admin','editor'), wrap(async (req, res) => 
   podcast.opusClipError = undefined;
   podcast.opusClipProjectId = undefined;
   podcast.opusClipOrgId = undefined;
-  podcast.opusClipOpenAiMoments = [];
+  podcast.opusClipOpenAiMoments = selectedStoryMoments;
   podcast.opusClipClips = [];
   await podcast.save();
   let job;

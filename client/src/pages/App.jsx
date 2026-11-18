@@ -732,10 +732,12 @@ export default function App() {
     }
   }
 
-  async function generateOpusClips() {
+  async function generateOpusClips(storyIndexes) {
     setBusy(true);
     try {
-      const { data } = await api.post(`/podcasts/${selected._id}/opusclip`);
+      const { data } = await api.post(`/podcasts/${selected._id}/opusclip`, {
+        ...(Array.isArray(storyIndexes) ? { storyIndexes } : {}),
+      });
       setError(data.message || 'Reel generation queued.');
       await refresh();
     } catch (e) {

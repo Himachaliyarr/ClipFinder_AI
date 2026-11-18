@@ -54,6 +54,8 @@ export default function PodcastDetailPage({ data, actions }) {
   const [activeTab, setActiveTab] = useState('transcript');
   const [aspectRatio, setAspectRatio] = useState('9:16');
   const [storyExportFormat, setStoryExportFormat] = useState('pdf');
+  const [showReelStoryPicker, setShowReelStoryPicker] = useState(false);
+  const [selectedStoryIndexes, setSelectedStoryIndexes] = useState([]);
   const [clipStatusFilter, setClipStatusFilter] = useState('all');
   const [clipAssigneeFilter, setClipAssigneeFilter] = useState('all');
   const filteredClips = clips.filter(clip => {
@@ -61,6 +63,20 @@ export default function PodcastDetailPage({ data, actions }) {
     return (clipStatusFilter === 'all' || clip.status === clipStatusFilter)
       && (clipAssigneeFilter === 'all' || (clipAssigneeFilter === 'unassigned' ? !assignedTo : String(assignedTo) === clipAssigneeFilter));
   });
+  function openReelStoryPicker() {
+    setSelectedStoryIndexes((selected?.storyMoments || []).map((_, index) => index).slice(0, 8));
+    setShowReelStoryPicker(true);
+  }
+  function toggleStoryIndex(index) {
+    setSelectedStoryIndexes(current => {
+      if (current.includes(index)) return current.filter(item => item !== index);
+      return current.length < 8 ? [...current, index] : current;
+    });
+  }
+  async function confirmReelGeneration() {
+    await generateOpusClips(selectedStoryIndexes);
+    setShowReelStoryPicker(false);
+  }
   const tabs = [
     { id: 'transcript', label: 'Transcript' },
     { id: 'stories', label: `Story moments (${selected?.storyMoments?.length || 0})` },
@@ -114,7 +130,7 @@ export default function PodcastDetailPage({ data, actions }) {
         {selected?.transcript && (selected?.sourceUrl || selected?.sourceFiles?.some(file => file.kind === 'video')) && (
           <button
             className="secondary"
-            onClick={generateOpusClips}
+            onClick={openReelStoryPicker}
             disabled={busy || hasOpusClipJob}
           >
             Generate Reels
@@ -385,7 +401,7 @@ export default function PodcastDetailPage({ data, actions }) {
             <div className="empty-state">
               <h3>No generated reels yet</h3>
               <p className="muted">Generate Reels from a YouTube source or uploaded video.</p>
-              <button className="secondary" onClick={generateOpusClips} disabled={busy || !selected?.transcript}>
+              <button className="secondary" onClick={openReelStoryPicker} disabled={busy || !selected?.transcript}>
                 Generate Reels
               </button>
             </div>
@@ -409,6 +425,48 @@ export default function PodcastDetailPage({ data, actions }) {
               }}
             />
             <p className="muted">Previewing {previewSource.start.toFixed(1)}–{previewSource.end.toFixed(1)} seconds from the source.</p>
+          </section>
+        </div>
+      )}
+      {showReelStoryPicker && (
+        <div className="clip-preview-backdrop" role="presentation" onClick={() => setShowReelStoryPicker(false)}>
+          <section className="clip-preview-modal reel-story-picker" role="dialog" aria-modal="true" aria-labelledby="reel-story-picker-title" onClick={event => event.stopPropagation()}>
+            <div className="clip-preview-header">
+              <h3 id="reel-story-picker-title">Select story moments for reels</h3>
+              <button type="button" className="secondary" onClick={() => setShowReelStoryPicker(false)}>Close</button>
+            </div>
+            {selected?.storyMoments?.length ? (
+              <>
+                <div className="reel-story-picker-actions">
+                  <button type="button" className="secondary" onClick={() => setSelectedStoryIndexes(selected.storyMoments.map((_, index) => index).slice(0, 8))}>Select all</button>
+                  <button type="button" className="secondary" onClick={() => setSelectedStoryIndexes([])}>Deselect all</button>
+                </div>
+                <div className="reel-story-options">
+                  {selected.storyMoments.map((story, index) => (
+                    <label className="reel-story-option" key={`${story.start}-${story.end}-${index}`}>
+                      <input
+                        type="checkbox"
+                        checked={selectedStoryIndexes.includes(index)}
+                        onChange={() => toggleStoryIndex(index)}
+                      />
+                      <span>
+                        <strong>{story.title || `Story ${index + 1}`}</strong>
+                        <small>{formatTranscriptTimestamp(story.start)} – {formatTranscriptTimestamp(story.end)}{story.summary ? ` · ${story.summary}` : ''}</small>
+                      </span>
+                    </label>
+                  ))}
+                </div>
+                <button
+                  type="button"
+                  onClick={confirmReelGeneration}
+                  disabled={busy || selectedStoryIndexes.length === 0}
+                >
+                  Generate reels for {selectedStoryIndexes.length} story {selectedStoryIndexes.length === 1 ? 'moment' : 'moments'}
+                </button>
+              </>
+            ) : (
+              <p className="muted">No story moments are available. Generate story moments first.</p>
+            )}
           </section>
         </div>
       )}
