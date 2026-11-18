@@ -352,6 +352,11 @@ input[type=file]::file-selector-button{margin-right:10px;padding:8px 11px;border
   transform: none;
 }
 
+.login button:focus-visible,
+.login input:focus-visible {
+  outline-color: #c79b41;
+}
+
 .login-help {
   margin: -4px 0 22px;
 }
