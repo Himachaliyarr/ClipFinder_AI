@@ -11,18 +11,11 @@ const run = (bin, args) => new Promise((resolve, reject) => {
   child.on('error', reject);
   child.on('close', code => code === 0 ? resolve() : reject(new Error(`${bin} exited ${code}: ${stderr}`)));
 });
-const esc = s => String(s ?? '').slice(0, 4000).replace(/[{}]/g, '').replace(/\\/g, '\\\\').replace(/:/g, '\\:').replace(/,/g, '\\,').replace(/\r?\n/g, '\\N');
-const assColour = (value, fallback) => /^&H[0-9A-Fa-f]{8}$/.test(String(value || '')) ? value : fallback;
 const videoEncoder = process.env.FFMPEG_VIDEO_ENCODER || (process.platform === 'darwin' ? 'h264_videotoolbox' : 'libx264');
 if (!['libx264', 'h264_videotoolbox'].includes(videoEncoder)) throw new Error('FFMPEG_VIDEO_ENCODER must be libx264 or h264_videotoolbox');
 const videoCodecArgs = videoEncoder === 'libx264'
   ? ['-c:v', videoEncoder, '-preset', process.env.FFMPEG_PRESET || 'veryfast', '-crf', '20']
   : ['-c:v', videoEncoder, '-b:v', process.env.FFMPEG_VIDEO_BITRATE || '8M'];
-const assFilterPath = value => String(value).replace(/\\/g, '\\\\').replace(/:/g, '\\:').replace(/,/g, '\\,').replace(/\[/g, '\\[').replace(/\]/g, '\\]');
-const assTime = seconds => {
-  const cs = Math.max(0, Math.round(seconds * 100));
-  return `${Math.floor(cs / 360000)}:${String(Math.floor(cs / 6000) % 60).padStart(2,'0')}:${String(Math.floor(cs / 100) % 60).padStart(2,'0')}.${String(cs % 100).padStart(2,'0')}`;
-};
 const youtubeDownloads = new Map();
 
 export async function resolveRenderSources(podcast, mediaRoot, signal, downloadVideo = downloadYouTubeVideo) {
@@ -77,31 +70,6 @@ export function getRenderDimensions(aspectRatio = '9:16') {
   throw new Error('Aspect ratio must be 9:16, 1:1, or 16:9');
 }
 
-function buildAss(clip, settings, outPath, width, height) {
-  const scale = Math.max(0.65, height / 1920);
-  const font = String(settings.fontName || 'Arial').replace(/[{},]/g, '');
-  const primary = assColour(settings.primaryColour, '&H00FFFFFF');
-  const outline = assColour(settings.outlineColour, '&H00000000');
-  const accent = assColour(settings.accentColour, '&H00419BC7');
-  const lines = [
-    '[Script Info]', 'ScriptType: v4.00+', `PlayResX: ${width}`, `PlayResY: ${height}`, 'WrapStyle: 2',
-    '[V4+ Styles]', 'Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding',
-    `Style: Brand,${font},${Math.round(58 * scale)},${primary},${accent},${outline},&H80000000,-1,0,1,4,2,2,${Math.round(70 * scale)},${Math.round(70 * scale)},${Math.round(230 * scale)},1`,
-    `Style: Hook,${font},${Math.round(48 * scale)},${accent},${primary},${outline},&H80000000,-1,0,1,3,1,8,${Math.round(70 * scale)},${Math.round(70 * scale)},${Math.round(120 * scale)},1`,
-    '[Events]', 'Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text'
-  ];
-  const segments = Array.isArray(clip.captionSegments) && clip.captionSegments.length
-    ? clip.captionSegments
-    : [{ start: 0, end: Math.max(0.5, clip.end - clip.start), text: clip.caption || clip.hook || clip.title }];
-  if (clip.hook) lines.push(`Dialogue: 1,${assTime(0)},${assTime(Math.min(3, clip.end-clip.start))},Hook,,0,0,0,,${esc(clip.hook)}`);
-  for (const seg of segments) {
-    const start = Math.max(0, Number(seg.start) || 0), end = Math.max(start + 0.2, Number(seg.end) || start + 2);
-    lines.push(`Dialogue: 0,${assTime(start)},${assTime(end)},Brand,,0,0,0,,${esc(seg.text)}`);
-  }
-  if (settings.brandText) lines.push(`Dialogue: 2,${assTime(0)},${assTime(Math.max(1, clip.end-clip.start))},Hook,,0,0,45,,${esc(settings.brandText)}`);
-  return fs.writeFile(outPath, lines.join('\n'), 'utf8');
-}
-
 /**
  * Render a vertical short. cameraSegments use clip-relative seconds and a `speaker`
  * value matching sourceFiles[].speaker. The editor may provide a manual camera map;
@@ -113,7 +81,6 @@ export async function renderClip({ clip, podcast, settings = {}, signal }) {
   const outputDir = path.join(mediaRoot, String(podcast._id), 'renders');
   await fs.mkdir(outputDir, { recursive: true });
   const output = path.join(outputDir, `${clip._id}-${Date.now()}-${nanoid(5)}.mp4`);
-  const ass = path.join(outputDir, `${clip._id}-${nanoid(5)}.ass`);
   const start = Math.max(0, Number(clip.start) || 0), end = Number(clip.end);
   if (!Number.isFinite(end) || end <= start) throw new Error('Clip end must be greater than start');
   const sources = await resolveRenderSources(podcast, mediaRoot, signal);
@@ -135,8 +102,6 @@ export async function renderClip({ clip, podcast, settings = {}, signal }) {
   if (cursor < duration - 0.02) plan.push({ start: cursor, end: duration, file: primary.path });
   if (!plan.length) plan.push({ start: 0, end: duration, file: primary.path });
   for (const seg of plan) { try { await fs.access(seg.file); } catch { throw new Error(`Media source not found: ${seg.file}`); } }
-  await buildAss(clip, settings, ass, width, height);
-
   // Create synchronized camera segments, normalize them, then concatenate. Each input
   // is independently seeked to the podcast time range so multi-camera files stay aligned.
   const parts = [];
@@ -162,13 +127,11 @@ export async function renderClip({ clip, podcast, settings = {}, signal }) {
     // Prefer an explicitly supplied mixed/master track; isolated speaker mics are not a final mix.
     const audioSource = sources.find(s => s.kind === 'mix') || primary;
     const args = ['-y','-i',videoInput,'-ss',String(start),'-i',audioSource.path,'-t',String(duration),
-      '-vf', `ass='${assFilterPath(ass)}'`,
       '-map','0:v:0','-map','1:a:0?',...videoCodecArgs,
       '-c:a','aac','-b:a','160k','-shortest','-movflags','+faststart',output];
     await run(process.env.FFMPEG_PATH || 'ffmpeg', args);
     return { output, duration, cameraSwitches: Math.max(0, plan.length - 1) };
   } finally {
-    await fs.unlink(ass).catch(()=>{});
     await Promise.all(parts.map(p => fs.unlink(p).catch(()=>{})));
   }
 }

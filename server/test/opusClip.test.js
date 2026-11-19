@@ -32,6 +32,7 @@ function mockEnvironment(t, fetchMock) {
 test('requires OpenAI timed moments to build OpusClip guidance', () => {
   assert.throws(() => buildOpusClipPrompt([]), /OpenAI must select at least one timed moment/);
   assert.match(buildOpusClipPrompt(openAiMoments), /OpenAI analyzed the source transcript/);
+  assert.match(buildOpusClipPrompt(openAiMoments), /no captions, subtitles, headings, titles/);
 });
 
 test('creates an OpusClip ClipAnything project directly from a YouTube source', async t => {
