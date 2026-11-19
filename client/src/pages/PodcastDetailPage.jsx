@@ -427,6 +427,19 @@ export default function PodcastDetailPage({ data, actions }) {
                       </div>
                       <h4>{story.title}</h4>
                       <p>{story.summary}</p>
+                      {sourceVideos.length > 0 && (
+                        <button
+                          type="button"
+                          className="secondary story-preview-action"
+                          onClick={() => previewSourceClip({
+                            title: story.title || `Story moment ${index + 1}`,
+                            start: story.start,
+                            end: story.end,
+                          })}
+                        >
+                          <PlayCircle size={16} /> Preview video
+                        </button>
+                      )}
                       {scriptLines.length ? (
                         <div className="story-script">
                           <strong className="story-script-heading">Exact transcript</strong>

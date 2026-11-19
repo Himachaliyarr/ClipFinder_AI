@@ -1133,6 +1133,14 @@ a:focus-visible {
   padding: 8px 11px;
 }
 
+.story-preview-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 2px 0 12px;
+  padding: 8px 11px;
+}
+
 .clip-save-state {
   display: block;
   min-height: 14px;
