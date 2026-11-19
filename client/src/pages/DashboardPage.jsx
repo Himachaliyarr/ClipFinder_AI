@@ -21,6 +21,8 @@ export default function DashboardPage({ data, actions }) {
     canDeletePodcasts,
     podcastSearch,
     podcastStatusFilter,
+    podcastDateFrom,
+    podcastDateTo,
     projectFolder,
     projectTags,
     folderFilter,
@@ -32,6 +34,8 @@ export default function DashboardPage({ data, actions }) {
   const {
     setPodcastSearch,
     setPodcastStatusFilter,
+    setPodcastDateFrom,
+    setPodcastDateTo,
     setProjectFolder,
     setProjectTags,
     setFolderFilter,
@@ -188,6 +192,26 @@ export default function DashboardPage({ data, actions }) {
               <option value="cancelled">Cancelled</option>
             </select>
           </label>
+          <label className="status-filter">
+            <span>From date</span>
+            <input
+              type="date"
+              value={podcastDateFrom}
+              max={podcastDateTo || undefined}
+              onChange={event => setPodcastDateFrom(event.target.value)}
+              aria-label="Filter podcasts created from date"
+            />
+          </label>
+          <label className="status-filter">
+            <span>To date</span>
+            <input
+              type="date"
+              value={podcastDateTo}
+              min={podcastDateFrom || undefined}
+              onChange={event => setPodcastDateTo(event.target.value)}
+              aria-label="Filter podcasts created until date"
+            />
+          </label>
           {(canDeletePodcasts && podcasts.length > 0) && (
             <label className="select-all-podcasts">
               <input
@@ -232,7 +256,13 @@ export default function DashboardPage({ data, actions }) {
             <span className="empty-state-icon"><Search size={22} /></span>
             <h4>No matching podcasts</h4>
             <p className="muted">Try another title or status filter.</p>
-            <button className="secondary" onClick={() => { setPodcastSearch(''); setPodcastStatusFilter('all'); setFolderFilter('all'); }}>
+            <button className="secondary" onClick={() => {
+              setPodcastSearch('');
+              setPodcastStatusFilter('all');
+              setFolderFilter('all');
+              setPodcastDateFrom('');
+              setPodcastDateTo('');
+            }}>
               Clear filters
             </button>
           </div>

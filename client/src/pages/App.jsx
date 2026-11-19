@@ -65,6 +65,8 @@ export default function App() {
   const [selectedPodcastIds, setSelectedPodcastIds] = useState([]);
   const [podcastSearch, setPodcastSearch] = useState('');
   const [podcastStatusFilter, setPodcastStatusFilter] = useState('all');
+  const [podcastDateFrom, setPodcastDateFrom] = useState('');
+  const [podcastDateTo, setPodcastDateTo] = useState('');
   const [projectFolder, setProjectFolder] = useState('');
   const [projectTags, setProjectTags] = useState('');
   const [folderFilter, setFolderFilter] = useState('all');
@@ -104,7 +106,16 @@ export default function App() {
       .some(value => String(value || '').toLowerCase().includes(search));
     const matchesStatus = podcastStatusFilter === 'all' || podcast.status === podcastStatusFilter;
     const matchesFolder = folderFilter === 'all' || (podcast.folder || '') === folderFilter;
-    return matchesSearch && matchesStatus && matchesFolder;
+    const createdAt = new Date(podcast.createdAt);
+    const matchesDateFrom = !podcastDateFrom || (
+      Number.isFinite(createdAt.getTime()) && createdAt >= new Date(`${podcastDateFrom}T00:00:00`)
+    );
+    const dateToExclusive = podcastDateTo ? new Date(`${podcastDateTo}T00:00:00`) : null;
+    if (dateToExclusive) dateToExclusive.setDate(dateToExclusive.getDate() + 1);
+    const matchesDateTo = !dateToExclusive || (
+      Number.isFinite(createdAt.getTime()) && createdAt < dateToExclusive
+    );
+    return matchesSearch && matchesStatus && matchesFolder && matchesDateFrom && matchesDateTo;
   });
   const folderOptions = [...new Set(podcasts.map(podcast => podcast.folder).filter(Boolean))].sort((a, b) => a.localeCompare(b));
   const allPodcastsSelected = filteredPodcasts.length > 0 && filteredPodcasts.every(podcast => selectedPodcastIds.includes(podcast._id));
@@ -1060,6 +1071,8 @@ export default function App() {
               filteredPodcasts,
               podcastSearch,
               podcastStatusFilter,
+              podcastDateFrom,
+              podcastDateTo,
               projectFolder,
               projectTags,
               folderFilter,
@@ -1074,6 +1087,8 @@ export default function App() {
             actions={{
               setPodcastSearch,
               setPodcastStatusFilter,
+              setPodcastDateFrom,
+              setPodcastDateTo,
               setProjectFolder,
               setProjectTags,
               setFolderFilter,
