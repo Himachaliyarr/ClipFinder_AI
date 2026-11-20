@@ -224,7 +224,7 @@ async function processMediaJob(job, signal) {
     await updatePodcastProgress(podcast, job, 'processing', 25, 'Audio ready; transcribing with configured provider', signal);
     const result = await transcribeLongAudio(audioPath,path.dirname(audio.path),signal);
     assertJobRunning(signal);
-    const transcriptionMessage = 'Transcription complete; selecting clips';
+    const transcriptionMessage = 'Transcription complete. Generate reel suggestions when ready.';
     await Podcast.findByIdAndUpdate(podcast._id, {
       $set: {
         transcript: result.transcript,
@@ -235,10 +235,10 @@ async function processMediaJob(job, signal) {
         duration: result.duration,
         language: result.language,
         timingNote: result.timingNote,
-        status: 'processing',
+        status: 'transcribed',
         jobId: job.id,
         jobType: job.name,
-        jobProgress: 75,
+        jobProgress: 100,
         jobMessage: transcriptionMessage,
         storyMoments: [],
         storyMomentsStatus: 'idle',
@@ -246,18 +246,15 @@ async function processMediaJob(job, signal) {
       },
       $unset: { storyMomentsError: 1 }
     });
-    await job.updateProgress({ percent: 75, message: transcriptionMessage });
-    return generateClipSuggestions({
-      podcast,
-      job,
-      transcript:result.transcript,
-      duration:result.duration,
-      segments:result.segments,
-      workDir:path.dirname(audio.path),
-      action:'transcription_completed',
-      language:result.language,
-      signal
+    await job.updateProgress({ percent: 100, message: transcriptionMessage });
+    await Activity.create({
+      user: job.data.userId,
+      action: 'transcription_completed',
+      entityType: 'Podcast',
+      entityId: podcast._id,
+      details: { language: result.language, segments: result.segments.length }
     });
+    return { podcastId: podcast.id };
   }
   if (job.name === 'opusclip-generate') {
     const podcast = await Podcast.findById(job.data.podcastId);
