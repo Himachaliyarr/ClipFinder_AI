@@ -17,6 +17,8 @@ export default function PodcastDetailPage({ data, actions }) {
     sourceKind,
     speakerKey,
     extraFiles,
+    localMediaDirectoryName,
+    localMediaCopyStatus,
     transcriptLines,
     transcriptVisible,
     hasTranscript,
@@ -39,6 +41,7 @@ export default function PodcastDetailPage({ data, actions }) {
     generateStories,
     generateOpusClips,
     uploadMore,
+    chooseLocalMediaFolder,
     setExportFormat,
     exportTranscript,
     setOpenTranscriptFor,
@@ -305,9 +308,14 @@ export default function PodcastDetailPage({ data, actions }) {
         </select>
         <input aria-label="Speaker key" value={speakerKey ?? ''} onChange={event => setSpeakerKey(event.target.value)} placeholder="Speaker key e.g. host_a" />
         <input type="file" multiple accept="video/*,audio/*" aria-label="Additional audio or video tracks" onChange={event => setExtraFiles(event.target.files)} />
-        <button onClick={uploadMore} disabled={busy || !extraFiles.length || (!speakerKey && sourceKind !== 'mix')}>
+        <button type="button" className="secondary" onClick={chooseLocalMediaFolder} disabled={busy}>
+          Choose local save folder
+        </button>
+        <span className="muted">{localMediaDirectoryName || 'Choose a destination for these tracks and later downloads.'}</span>
+        <button onClick={uploadMore} disabled={busy || !extraFiles.length || !localMediaDirectoryName || (!speakerKey && sourceKind !== 'mix')}>
           Upload track
         </button>
+        {localMediaCopyStatus && <p className="muted" role="status" aria-live="polite">{localMediaCopyStatus}…</p>}
         {uploadProgress && (
           <div className="upload-transfer-progress" role="status" aria-live="polite">
             <span>Uploading {uploadProgress.fileName} · {Math.floor(uploadProgress.loaded / 1024 ** 2)} / {Math.ceil(uploadProgress.total / 1024 ** 2)} MiB</span>
@@ -643,7 +651,7 @@ export default function PodcastDetailPage({ data, actions }) {
                     {clip.renderStatus === 'completed' && (
                       <>
                         <button className="secondary" onClick={() => openRenderedPreview(clip._id)}>Preview render</button>
-                        <button className="secondary" onClick={() => downloadClip(clip._id)}>Download MP4</button>
+                        <button className="secondary" onClick={() => downloadClip(clip._id)} disabled={busy}>Save to local folder</button>
                       </>
                     )}
                   </div>
@@ -703,7 +711,7 @@ export default function PodcastDetailPage({ data, actions }) {
                       {clip.renderStatus === 'completed' && (
                         <>
                           <button className="secondary" type="button" onClick={() => openRenderedPreview(clip._id)}>Preview</button>
-                          <button className="secondary" type="button" onClick={() => downloadClip(clip._id)}>Download MP4</button>
+                          <button className="secondary" type="button" onClick={() => downloadClip(clip._id)} disabled={busy}>Save to local folder</button>
                         </>
                       )}
                       <button
