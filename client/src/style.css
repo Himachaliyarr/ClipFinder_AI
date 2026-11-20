@@ -46,6 +46,26 @@ button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-vis
 .app[data-theme="light"] .podicon{color:#a67b2d}
 .app[data-theme="light"] .metricgrid small,.app[data-theme="light"] .activityitem span{color:#697080}
 .app[data-theme="light"] .metricgrid strong{color:#9a7025}
+.clip-sentence-editor{margin:14px 0;padding:14px;background:#101215;border:1px solid #303237;border-radius:10px}
+.clip-sentence-editor-heading,.clip-sentence-footer{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap}
+.clip-sentence-editor-heading p{margin:4px 0 0;font-size:12px}
+.clip-sentence-list{display:grid;gap:8px;margin:12px 0;padding:0;list-style:none}
+.clip-sentence-list li{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px;background:#191b1f;border:1px solid #303237;border-radius:8px}
+.clip-sentence-copy{display:grid;gap:4px;min-width:0}
+.clip-sentence-times{display:flex;gap:8px;flex-wrap:wrap}
+.clip-sentence-times label{display:grid;gap:3px;color:#c79b41;font-size:11px}
+.clip-sentence-times input{width:128px;padding:6px 8px;font-variant-numeric:tabular-nums}
+.clip-sentence-times input[aria-invalid="true"]{border-color:#ff7777}
+.clip-sentence-copy span{color:#ddd;overflow-wrap:anywhere}
+.clip-sentence-actions{display:flex;gap:6px;flex-shrink:0}
+.clip-sentence-actions button{padding:7px 10px}
+.clip-sentence-footer{justify-content:flex-start}
+.clip-sentence-footer small{flex:1 1 100%;min-height:1em}
+.app[data-theme="light"] .clip-sentence-editor{background:#f8f9fb;border-color:#e3e6ec}
+.app[data-theme="light"] .clip-sentence-list li{background:#fff;border-color:#e3e6ec}
+.app[data-theme="light"] .clip-sentence-copy span{color:#4d5563}
+.app[data-theme="light"] .clip-sentence-times label{color:#96702a}
+@media(max-width:550px){.clip-sentence-list li{align-items:flex-start;flex-direction:column}.clip-sentence-actions{align-self:flex-end}}
 .app[data-theme="light"] input,.app[data-theme="light"] textarea,.app[data-theme="light"] select,.app[data-theme="light"] .transcript-export-format{background:#f8f9fb;color:#252a34;border-color:#dfe3ea}
 .app[data-theme="light"] .secondary,.app[data-theme="light"] .logout{background:#fff;color:#3b414d;border-color:#dfe3ea}
 .app[data-theme="light"] .logout:hover{background:#f5f6f8}

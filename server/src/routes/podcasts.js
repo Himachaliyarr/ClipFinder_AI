@@ -10,6 +10,7 @@ import { auth, allow } from '../middleware/auth.js';
 import { enqueueYoutubeTranscription, enqueueTranscription, enqueueClipSelection, enqueueStorySelection, enqueueOpusClipProject, enqueueRender, mediaQueue, requestMediaJobCancellation } from '../queue.js';
 import { normalizeYouTubeUrl } from '../services/youtube.js';
 import { applySpeakerCorrections } from '../services/transcript.js';
+import { normalizeSentenceEdits } from '../services/clipSentenceEdits.js';
 import { normalizeFolder, normalizeTags } from '../services/projectMetadata.js';
 import { getExpectedChunkLength } from '../services/resumableUpload.js';
 import { MAX_UPLOAD_BYTES, MAX_UPLOAD_FILES, MAX_RESUMABLE_UPLOAD_BYTES, UPLOAD_CHUNK_BYTES } from '../config/limits.js';
@@ -921,7 +922,7 @@ r.get('/:id/clips', auth, wrap(async (req, res) => {
 }));
 r.patch('/clips/:clipId', auth, allow('admin','editor'), wrap(async (req, res) => {
   if (!validId(req.params.clipId)) return res.status(400).json({ error: 'Invalid clip id' });
-  const allowed = ['start','end','hook','title','caption','status','assignedTo','editorNotes','cameraSegments','captionSegments','performance'];
+  const allowed = ['start','end','hook','title','caption','status','assignedTo','editorNotes','cameraSegments','captionSegments','performance','sentenceEdits'];
   const update = {}; for (const k of allowed) if (req.body?.[k] !== undefined) update[k] = req.body[k];
   if (update.performance !== undefined) {
     if (!update.performance || typeof update.performance !== 'object' || Array.isArray(update.performance)) return res.status(400).json({ error: 'Performance must include views or watch time' });
@@ -951,6 +952,20 @@ r.patch('/clips/:clipId', auth, allow('admin','editor'), wrap(async (req, res) =
   }
   const start = Number(update.start ?? existing.start), end = Number(update.end ?? existing.end);
   if (!Number.isFinite(start) || !Number.isFinite(end) || start < 0 || end <= start || (podcast.duration && end > podcast.duration + 0.25)) return res.status(400).json({ error: 'Trim must be within the source duration and end must be greater than start' });
+  const trimChanged = start !== Number(existing.start) || end !== Number(existing.end);
+  if (update.sentenceEdits !== undefined) {
+    try {
+      update.sentenceEdits = normalizeSentenceEdits(update.sentenceEdits, start, end);
+    } catch (error) {
+      return res.status(400).json({ error: error.message });
+    }
+  } else if (trimChanged && existing.sentenceEdits?.length) {
+    try {
+      normalizeSentenceEdits(existing.sentenceEdits, start, end);
+    } catch {
+      return res.status(409).json({ error: 'Restore or update sentence edits before changing the clip trim' });
+    }
+  }
   if (update.status && !['suggested','approved','rejected','rendered','published'].includes(update.status)) return res.status(400).json({ error: 'Invalid clip status' });
   if (existing.status === 'published' && update.status && update.status !== 'published') {
     return res.status(409).json({ error: 'Published clips cannot return to an earlier workflow stage' });
@@ -960,8 +975,27 @@ r.patch('/clips/:clipId', auth, allow('admin','editor'), wrap(async (req, res) =
   }
   if (update.cameraSegments && (!Array.isArray(update.cameraSegments) || update.cameraSegments.some(s => !Number.isFinite(Number(s.start)) || !Number.isFinite(Number(s.end)) || Number(s.start) < 0 || Number(s.end) <= Number(s.start) || Number(s.end) > end-start+0.25))) return res.status(400).json({ error: 'Camera segments must use valid clip-relative time ranges' });
   if (update.cameraSegments && update.cameraSegments.some(s => !podcast.sourceFiles.some(f => f.speaker === s.speaker && f.kind === 'video'))) return res.status(400).json({ error: 'Each camera segment speaker must match an uploaded video camera speaker key' });
+  const previousSentenceEdits = (existing.sentenceEdits || []).map(({ sentenceId, start: itemStart, end: itemEnd }) => ({
+    ...(sentenceId ? { sentenceId } : {}),
+    start: Number(itemStart),
+    end: Number(itemEnd),
+  }));
+  const sentenceEditsChanged = update.sentenceEdits !== undefined
+    && JSON.stringify(previousSentenceEdits) !== JSON.stringify(update.sentenceEdits);
+  const renderNeedsReset = sentenceEditsChanged || trimChanged;
+  if (renderNeedsReset) {
+    if (['queued','processing'].includes(existing.renderStatus)) {
+      return res.status(409).json({ error: 'Wait for the current render to finish before changing clip edits' });
+    }
+    existing.renderPath = undefined;
+    existing.renderJobId = undefined;
+    existing.renderStatus = 'idle';
+    existing.renderProgress = 0;
+    existing.renderError = undefined;
+    if (existing.status === 'rendered') existing.status = 'approved';
+  }
   Object.assign(existing, update); await existing.save();
-  await Activity.create({ user: req.user.id, action: update.status ? `clip_${update.status}` : update.assignedTo !== undefined ? 'clip_assigned' : 'clip_updated', entityType: 'Clip', entityId: existing.id, details: update });
+  await Activity.create({ user: req.user.id, action: sentenceEditsChanged ? 'clip_sentences_edited' : update.status ? `clip_${update.status}` : update.assignedTo !== undefined ? 'clip_assigned' : 'clip_updated', entityType: 'Clip', entityId: existing.id, details: update });
   await existing.populate('assignedTo', 'name email role');
   res.json(publicClip(existing));
 }));

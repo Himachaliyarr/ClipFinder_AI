@@ -3,6 +3,7 @@ import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { nanoid } from 'nanoid';
 import { downloadYouTubeVideo } from './youtube.js';
+import { normalizeSentenceEdits } from './clipSentenceEdits.js';
 
 const run = (bin, args) => new Promise((resolve, reject) => {
   const child = spawn(bin, args, { stdio: ['ignore', 'ignore', 'pipe'] });
@@ -17,6 +18,199 @@ const videoCodecArgs = videoEncoder === 'libx264'
   ? ['-c:v', videoEncoder, '-preset', process.env.FFMPEG_PRESET || 'veryfast', '-crf', '20']
   : ['-c:v', videoEncoder, '-b:v', process.env.FFMPEG_VIDEO_BITRATE || '8M'];
 const youtubeDownloads = new Map();
+const ffmpeg = () => process.env.FFMPEG_PATH || 'ffmpeg';
+const ffprobe = () => {
+  if (process.env.FFPROBE_PATH) return process.env.FFPROBE_PATH;
+  const configuredFfmpeg = process.env.FFMPEG_PATH;
+  if (configuredFfmpeg && /[\\/]/.test(configuredFfmpeg)) {
+    return path.join(path.dirname(configuredFfmpeg), process.platform === 'win32' ? 'ffprobe.exe' : 'ffprobe');
+  }
+  return process.platform === 'win32' ? 'ffprobe.exe' : 'ffprobe';
+};
+
+function getCameraPlan(clip, start, end, primaryPath, speakerFiles) {
+  const duration = end - start;
+  const requested = (clip.cameraSegments || []).filter(segment => segment.speaker && speakerFiles.has(segment.speaker))
+    .map(segment => ({
+      start: Math.max(0, Number(segment.start) || 0),
+      end: Math.min(duration, Number(segment.end) || duration),
+      file: speakerFiles.get(segment.speaker),
+    }))
+    .filter(segment => segment.end > segment.start)
+    .sort((a, b) => a.start - b.start);
+  const plan = [];
+  let cursor = 0;
+  for (const segment of requested) {
+    if (segment.start < cursor - 0.02) throw new Error('Camera plan contains overlapping segments');
+    if (segment.start > cursor + 0.02) plan.push({ start: cursor, end: segment.start, file: primaryPath });
+    plan.push({ ...segment, start: Math.max(cursor, segment.start) });
+    cursor = segment.end;
+  }
+  if (cursor < duration - 0.02) plan.push({ start: cursor, end: duration, file: primaryPath });
+  if (!plan.length) plan.push({ start: 0, end: duration, file: primaryPath });
+  return plan;
+}
+
+export function buildSentenceCameraPlan(clip, primaryPath, speakerFiles = new Map()) {
+  const start = Math.max(0, Number(clip.start) || 0);
+  const end = Number(clip.end);
+  if (!Number.isFinite(end) || end <= start) throw new Error('Clip end must be greater than start');
+  const cameraPlan = getCameraPlan(clip, start, end, primaryPath, speakerFiles);
+  const edits = normalizeSentenceEdits(clip.sentenceEdits || [], start, end);
+  if (!edits.length) return cameraPlan;
+
+  const plan = [];
+  for (const edit of edits) {
+    const rangeStart = edit.start - start;
+    const rangeEnd = edit.end - start;
+    for (const camera of cameraPlan) {
+      const segmentStart = Math.max(rangeStart, camera.start);
+      const segmentEnd = Math.min(rangeEnd, camera.end);
+      if (segmentEnd > segmentStart) {
+        plan.push({ start: segmentStart, end: segmentEnd, file: camera.file });
+      }
+    }
+  }
+  return plan;
+}
+
+async function probeAudioSource(file) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(ffprobe(), [
+      '-v', 'error',
+      '-select_streams', 'a:0',
+      '-show_entries', 'stream=codec_type',
+      '-of', 'csv=p=0',
+      file,
+    ], { stdio: ['ignore', 'pipe', 'pipe'] });
+    let stdout = '';
+    let stderr = '';
+    child.stdout.on('data', data => { stdout += data.toString(); });
+    child.stderr.on('data', data => { stderr += data.toString(); });
+    child.on('error', reject);
+    child.on('close', code => {
+      if (code === 0) resolve(Boolean(stdout.trim()));
+      else reject(new Error(`ffprobe exited ${code}: ${stderr}`));
+    });
+  });
+}
+
+async function concatenateWithFilter(parts, outputDir, clipId, suffix, temporaryFiles, track) {
+  let current = parts;
+  let level = 0;
+  const groupSize = 8;
+  const isAudio = track === 'audio';
+  const extension = isAudio ? 'm4a' : 'mp4';
+
+  while (current.length > 1) {
+    const next = [];
+    for (let offset = 0; offset < current.length; offset += groupSize) {
+      const group = current.slice(offset, offset + groupSize);
+      if (group.length === 1) {
+        next.push(group[0]);
+        continue;
+      }
+
+      const outputPath = path.join(outputDir, `${clipId}-${nanoid(5)}-${suffix}-${level}-${offset}.${extension}`);
+      temporaryFiles.push(outputPath);
+      const filterGraph = group.map((_, index) => (
+        isAudio
+          ? `[${index}:a:0]asetpts=PTS-STARTPTS,aresample=48000[a${index}]`
+          : `[${index}:v:0]setpts=PTS-STARTPTS[v${index}]`
+      ));
+      const concatInputs = group.map((_, index) => `[${isAudio ? 'a' : 'v'}${index}]`).join('');
+      filterGraph.push(isAudio
+        ? `${concatInputs}concat=n=${group.length}:v=0:a=1[outa]`
+        : `${concatInputs}concat=n=${group.length}:v=1:a=0[outv]`);
+
+      const args = ['-y'];
+      for (const file of group) args.push('-i', file);
+      args.push('-filter_complex', filterGraph.join(';'), '-map', isAudio ? '[outa]' : '[outv]');
+      if (isAudio) {
+        args.push('-c:a', 'aac', '-b:a', '160k', '-ar', '48000', '-ac', '2');
+      } else {
+        args.push(...videoCodecArgs, '-pix_fmt', 'yuv420p', '-an');
+      }
+      args.push(outputPath);
+      await run(ffmpeg(), args);
+      next.push(outputPath);
+    }
+    current = next;
+    level += 1;
+  }
+  return current[0];
+}
+
+async function renderEditedClip({ clip, sources, primary, speakerFiles, outputDir, output, width, height }) {
+  const start = Math.max(0, Number(clip.start) || 0);
+  const end = Number(clip.end);
+  const edits = normalizeSentenceEdits(clip.sentenceEdits, start, end);
+  if (!edits.length) throw new Error('At least one sentence is required for an edited clip');
+  const plan = buildSentenceCameraPlan(clip, primary.path, speakerFiles);
+  if (!plan.length) throw new Error('Sentence edits contain no renderable source ranges');
+  for (const segment of plan) {
+    try {
+      await fs.access(segment.file);
+    } catch {
+      throw new Error(`Media source not found: ${segment.file}`);
+    }
+  }
+
+  const temporaryFiles = [];
+  try {
+    const videoParts = [];
+    for (let index = 0; index < plan.length; index += 1) {
+      const segment = plan[index];
+      const part = path.join(outputDir, `${clip._id}-${nanoid(6)}-sentence-video-${index}.mp4`);
+      temporaryFiles.push(part);
+      await run(ffmpeg(), [
+        '-y', '-ss', String(start + segment.start), '-i', segment.file, '-t', String(segment.end - segment.start),
+        '-vf', `scale=${width}:${height}:force_original_aspect_ratio=increase,crop=${width}:${height},setsar=1,fps=30`,
+        '-an', ...videoCodecArgs, '-pix_fmt', 'yuv420p', part,
+      ]);
+      videoParts.push(part);
+    }
+    const videoInput = await concatenateWithFilter(videoParts, outputDir, clip._id, 'sentence-video', temporaryFiles, 'video');
+
+    const audioSource = sources.find(source => source.kind === 'mix') || primary;
+    const hasAudio = await probeAudioSource(audioSource.path);
+    const args = ['-y', '-i', videoInput];
+    if (hasAudio) {
+      const audioParts = [];
+      for (let index = 0; index < edits.length; index += 1) {
+        const edit = edits[index];
+        const part = path.join(outputDir, `${clip._id}-${nanoid(6)}-sentence-audio-${index}.m4a`);
+        temporaryFiles.push(part);
+        await run(ffmpeg(), [
+          '-y', '-ss', String(edit.start), '-i', audioSource.path, '-t', String(edit.end - edit.start),
+          '-map', '0:a:0', '-vn', '-c:a', 'aac', '-b:a', '160k', '-ar', '48000', '-ac', '2', part,
+        ]);
+        audioParts.push(part);
+      }
+      const audioInput = await concatenateWithFilter(audioParts, outputDir, clip._id, 'sentence-audio', temporaryFiles, 'audio');
+      args.push('-i', audioInput, '-filter_complex', '[1:a:0]apad[aout]', '-map', '0:v:0', '-map', '[aout]');
+    } else {
+      args.push('-map', '0:v:0', '-an');
+    }
+    args.push(...videoCodecArgs);
+    if (hasAudio) args.push('-c:a', 'aac', '-b:a', '160k');
+    args.push('-shortest', '-movflags', '+faststart', output);
+    await run(ffmpeg(), args);
+    const cameraSwitches = plan.reduce((count, segment, index) => (
+      index > 0 && plan[index - 1].file !== segment.file ? count + 1 : count
+    ), 0);
+    return {
+      output,
+      duration: edits.reduce((total, edit) => total + edit.end - edit.start, 0),
+      cameraSwitches,
+    };
+  } catch (error) {
+    await fs.rm(output, { force: true });
+    throw error;
+  } finally {
+    await Promise.all(temporaryFiles.map(file => fs.rm(file, { force: true })));
+  }
+}
 
 export async function resolveRenderSources(podcast, mediaRoot, signal, downloadVideo = downloadYouTubeVideo) {
   const sources = [...(podcast.sourceFiles || [])];
@@ -89,6 +283,9 @@ export async function renderClip({ clip, podcast, settings = {}, signal }) {
   const speakerFiles = new Map(sources.filter(s => s.speaker && s.kind !== 'audio' && s.kind !== 'mix').map(s => [s.speaker, s.path]));
   const primary = sources.find(s => s.kind === 'video');
   if (!primary) throw new Error('Rendering requires at least one uploaded video camera source');
+  if (clip.sentenceEdits?.length) {
+    return renderEditedClip({ clip, sources, primary, speakerFiles, outputDir, output, width, height });
+  }
   const requested = (clip.cameraSegments || []).filter(s => s.speaker && speakerFiles.has(s.speaker))
     .map(s => ({ start: Math.max(0, Number(s.start) || 0), end: Math.min(duration, Number(s.end) || duration), file: speakerFiles.get(s.speaker) }))
     .filter(s => s.end > s.start).sort((a,b) => a.start-b.start);

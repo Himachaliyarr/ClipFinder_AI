@@ -123,6 +123,7 @@ const ClipSchema = new Schema(
     renderError: String,
     cameraSegments: [{ start: Number, end: Number, speaker: String }],
     captionSegments: [{ start: Number, end: Number, text: String }],
+    sentenceEdits: [{ sentenceId: String, start: Number, end: Number }],
     editorNotes: String,
     performance: {
       views: { type: Number, min: 0 },

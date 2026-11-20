@@ -1,7 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  buildClipSentenceEditPatch,
   formatClipTimecode,
+  formatEditableTimestamp,
   formatClipMetadataCsv,
   formatStoryMetadataCsv,
   formatStoryMetadataText,
@@ -11,7 +13,9 @@ import {
   formatTranscriptVtt,
   getTranscriptLines,
   getTranscriptLinesInRange,
+  getTranscriptLinesOverlappingRange,
   parseClipTimecode,
+  parseEditableTimestamp,
 } from '../src/utils/transcript.js';
 
 test('formats clip boundaries as full timecodes and parses validated edits back to seconds', () => {
@@ -23,6 +27,13 @@ test('formats clip boundaries as full timecodes and parses validated edits back 
   assert.equal(parseClipTimecode('00:60:00'), null);
   assert.equal(parseClipTimecode('00:00:60'), null);
   assert.equal(parseClipTimecode('2020'), null);
+});
+
+test('formats and parses editable sentence timestamps to millisecond precision', () => {
+  assert.equal(formatEditableTimestamp(2347.123), '00:39:07.123');
+  assert.equal(parseEditableTimestamp('00:39:07.123'), 2347.123);
+  assert.equal(parseEditableTimestamp('00:39:07'), 2347);
+  assert.equal(parseEditableTimestamp('00:60:07.123'), null);
 });
 
 test('groups word timings by sentence and starts a new line when the speaker changes', () => {
@@ -64,6 +75,42 @@ test('selects only timestamped transcript segments overlapping a story range', (
   assert.deepEqual(lines, [
     { start: 0.5, end: 1.4, speaker: null, text: 'This is inside.' },
   ]);
+});
+
+test('preserves full sentence timestamps when the clip trim overlaps only part of the sentence', () => {
+  assert.deepEqual(getTranscriptLinesOverlappingRange([
+    { start: 2, end: 2.2, text: 'This', timingType: 'word' },
+    { start: 2.3, end: 2.5, text: 'whole', timingType: 'word' },
+    { start: 2.6, end: 2.9, text: 'sentence.', timingType: 'word' },
+    { start: 3, end: 3.2, text: 'Next.', timingType: 'word' },
+  ], 2.4, 3.5), [
+    { start: 2, end: 2.9, speaker: null, text: 'This whole sentence.' },
+    { start: 3, end: 3.2, speaker: null, text: 'Next.' },
+  ]);
+});
+
+test('expands a clip trim to keep reordered boundary sentences whole and shifts its camera plan', () => {
+  const patch = buildClipSentenceEditPatch({
+    start: 2.5,
+    end: 5,
+    cameraSegments: [{ start: 0.5, end: 2, speaker: 'host' }],
+  }, [
+    { sentenceId: 'second', start: 3, end: 4, text: 'Second sentence.' },
+    { sentenceId: 'first', start: 2, end: 2.8, text: 'First sentence.' },
+  ], [
+    { sentenceId: 'first', start: 2, end: 2.8, text: 'First sentence.' },
+    { sentenceId: 'second', start: 3, end: 4, text: 'Second sentence.' },
+  ]);
+
+  assert.deepEqual(patch, {
+    start: 2,
+    end: 5,
+    sentenceEdits: [
+      { sentenceId: 'second', start: 3, end: 4 },
+      { sentenceId: 'first', start: 2, end: 2.8 },
+    ],
+    cameraSegments: [{ start: 1, end: 2.5, speaker: 'host' }],
+  });
 });
 
 test('exports transcript lines with timestamps and speaker labels', () => {

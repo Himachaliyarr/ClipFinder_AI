@@ -6,6 +6,7 @@ import PodcastJobProgress, {
   isPodcastJobActive,
 } from '../components/PodcastJobProgress.jsx';
 import TranscriptPanel from '../components/TranscriptPanel.jsx';
+import ClipSentenceEditor from '../components/ClipSentenceEditor.jsx';
 
 // Podcast processing, transcript, story, and clip controls belong to the detail page.
 export default function PodcastDetailPage({ data, actions }) {
@@ -585,6 +586,12 @@ export default function PodcastDetailPage({ data, actions }) {
                       )}
                     </div>
                   )}
+                  <ClipSentenceEditor
+                    clip={clip}
+                    transcriptSegments={selected?.segments}
+                    sourceDuration={selected?.duration}
+                    onSave={updateClip}
+                  />
                   <div className="trimrow">
                     <label>
                       In (HH:MM:SS)
@@ -674,13 +681,17 @@ export default function PodcastDetailPage({ data, actions }) {
             </div>
             {clips.some(clip => clip.renderStatus && clip.renderStatus !== 'idle') ? (
               <div className="opusclip-grid">
-                {clips.filter(clip => clip.renderStatus && clip.renderStatus !== 'idle').map(clip => (
+                {clips.filter(clip => clip.renderStatus && clip.renderStatus !== 'idle').map(clip => {
+                  const renderDuration = clip.sentenceEdits?.length
+                    ? clip.sentenceEdits.reduce((total, sentence) => total + sentence.end - sentence.start, 0)
+                    : clip.end - clip.start;
+                  return (
                   <article className="opusclip-card generated-render-card" key={clip._id}>
                     <div className="generated-render-heading">
                       <h4>{clip.title}</h4>
                       <span className={`status ${clip.renderStatus}`}>{clip.renderStatus}</span>
                     </div>
-                    <p className="muted">{(clip.end - clip.start).toFixed(1)}s · {aspectRatio}</p>
+                    <p className="muted">{renderDuration.toFixed(1)}s · {aspectRatio}</p>
                     {['queued', 'processing'].includes(clip.renderStatus) && (
                       <div className="rendered-progress">
                         <span>{clip.renderStatus} · {clip.renderProgress || 0}%</span>
@@ -709,7 +720,8 @@ export default function PodcastDetailPage({ data, actions }) {
                       )}
                     </div>
                   </article>
-                ))}
+                  );
+                })}
               </div>
             ) : <p className="muted empty-inline">No locally rendered clips yet. Approve a suggestion and render it to get started.</p>}
           </section>
