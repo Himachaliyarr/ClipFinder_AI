@@ -304,7 +304,7 @@ r.post('/youtube', auth, allow('admin','editor'), wrap(async (req, res) => {
     await podcast.save();
     await Activity.create({ user: req.user.id, action: 'youtube_transcription_queued', entityType: 'Podcast', entityId: podcast._id });
     res.status(202).json({
-      message: 'YouTube transcription queued; media will not be saved locally',
+      message: 'YouTube transcription queued; the source video is downloaded when rendering a clip',
       podcast: publicPodcast(podcast),
       jobId: job.id,
     });
@@ -944,6 +944,28 @@ r.get('/:id/source', wrap(async (req, res) => {
   await Activity.create({ user: user._id, action: 'source_preview_accessed', entityType: 'Podcast', entityId: podcast._id });
   res.type(path.extname(resolved)).sendFile(resolved, err => {
     if (err && !res.headersSent) res.status(404).json({ error: 'Source media file not found' });
+  });
+}));
+r.get('/:id/youtube-source', auth, wrap(async (req, res) => {
+  if (!validId(req.params.id)) return res.status(400).json({ error: 'Invalid podcast id' });
+  const podcast = await Podcast.findById(req.params.id).select('sourceUrl title');
+  if (!podcast) return res.status(404).json({ error: 'Podcast not found' });
+  if (!podcast.sourceUrl) return res.status(404).json({ error: 'This podcast does not have a YouTube source' });
+
+  const resolved = path.resolve(root, podcast.id, 'youtube-source.mp4');
+  const rootPrefix = root.endsWith(path.sep) ? root : `${root}${path.sep}`;
+  if (!resolved.startsWith(rootPrefix)) return res.status(403).json({ error: 'Invalid YouTube source path' });
+  try {
+    const stat = await fs.promises.stat(resolved);
+    if (!stat.isFile() || stat.size === 0) return res.status(404).json({ error: 'Render a clip before saving the YouTube source video' });
+  } catch (error) {
+    if (error.code === 'ENOENT') return res.status(404).json({ error: 'Render a clip before saving the YouTube source video' });
+    throw error;
+  }
+  res.set('Cache-Control', 'private, no-store');
+  await Activity.create({ user: req.user.id, action: 'youtube_source_accessed', entityType: 'Podcast', entityId: podcast._id });
+  res.type('mp4').sendFile(resolved, error => {
+    if (error && !res.headersSent) res.status(404).json({ error: 'YouTube source video not found' });
   });
 }));
 r.get('/:id', auth, wrap(async (req, res) => { if (!validId(req.params.id)) return res.status(400).json({ error: 'Invalid podcast id' }); const p = await Podcast.findById(req.params.id); if (!p) return res.status(404).json({ error: 'Not found' }); res.json(publicPodcast(p)); }));

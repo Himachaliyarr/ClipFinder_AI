@@ -147,7 +147,7 @@ async function processMediaJob(job, signal) {
         jobId: job.id,
         jobType: job.name,
         jobProgress: 100,
-        jobMessage: 'Transcript complete; YouTube media was not saved'
+        jobMessage: 'Transcript complete; the source video is downloaded when rendering a clip'
       },
       $unset: { error: 1 }
     });

@@ -36,6 +36,10 @@ Official docs:
 
 BullMQ transcription/render jobs, speaker-keyed camera plans, branded ASS caption burn-in, clip trim/re-render and authenticated preview endpoints are implemented. When at least two isolated mic tracks and matching speaker-keyed camera videos are uploaded, the worker automatically generates a heuristic camera plan for each suggested clip. Editors can review and override it. This RMS-based method is not robust diarization and requires synchronized tracks. This is still not a fully audited production deployment: malware scanning, HTTPS, SSO/2FA, upload quotas, reverse-proxy body-size configuration, retention policies, off-site backup storage/rotation, provider billing ingestion, provider accuracy comparison, and real-footage QA remain deployment tasks. A manual MongoDB + media backup command is included; schedule backups and test restores before production use. Deepgram word-level timestamps are implemented but need validation on authorized Hindi/Hinglish recordings. Validate synchronized camera source files and caption font rendering (Roman Hinglish and Devanagari) on your own media before production use.
 
+## Local media copies
+
+In desktop Chrome or Edge over HTTPS (or localhost), choose a destination folder before creating a project. Uploaded audio/video is copied to that folder on the user's computer and also uploaded to `MEDIA_ROOT` for processing. The app remembers the folder handle in that browser; access may need to be granted again after restarting the browser. Additional source tracks can use a newly selected folder. Use **Save to local folder** on a rendered clip to save the MP4; for YouTube projects this also copies the source video after it has been downloaded for rendering. The server-side processing copy remains available to the workspace.
+
 ## Requirements
 
 - Node.js 20+
@@ -120,6 +124,7 @@ YouTube URL import uses `yt-dlp`, installed with the server dependencies, and re
 - `PATCH /api/podcasts/clips/:clipId` (trim, captions, assignment, and workflow status)
 - `POST /api/podcasts/clips/:clipId/render` (enqueue branded render)
 - `GET /api/podcasts/clips/:clipId/render` (authenticated MP4 preview; originals are not exposed as public static files)
+- `GET /api/podcasts/:id/youtube-source` (authenticated YouTube source download after the source has been fetched for rendering)
 - `POST /api/podcasts/:id/source-preview` (create a short-lived authenticated source-preview link)
 - `GET /api/podcasts/analytics/backup-status` (admin-only latest backup and integrity-check status)
 - `POST /api/podcasts/analytics/backup-restore-test` (admin-only record after a completed restore drill)

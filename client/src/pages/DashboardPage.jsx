@@ -11,6 +11,8 @@ export default function DashboardPage({ data, actions }) {
     sourceKind,
     speakerKey,
     files,
+    localMediaDirectoryName,
+    localMediaCopyStatus,
     uploadLimits,
     uploadProgress,
     busy,
@@ -45,6 +47,7 @@ export default function DashboardPage({ data, actions }) {
     setSourceKind,
     setSpeakerKey,
     setFiles,
+    chooseLocalMediaFolder,
     create,
     toggleSelectAllPodcasts,
     deleteSelectedPodcasts,
@@ -83,8 +86,13 @@ export default function DashboardPage({ data, actions }) {
             <span className="eyebrow">START A PROJECT</span>
             <h3 id="new-podcast-heading">New podcast</h3>
             <p className="muted">
-              Upload a video or paste a YouTube link. YouTube video is
-              downloaded only when you render a clip.
+              Upload a video or paste a YouTube link. A YouTube source is
+              downloaded when rendering and copied to your chosen folder when
+              you save a rendered clip.
+            </p>
+            <p className="muted">
+              Choose a local folder for source files and downloaded renders.
+              Files are also kept on the processing server.
             </p>
             {uploadLimits && (
               <p className="muted">
@@ -176,12 +184,19 @@ export default function DashboardPage({ data, actions }) {
               placeholder="https://youtube.com/watch?v=..."
             />
           </label>
+          <div className="local-media-destination">
+            <button type="button" className="secondary" onClick={chooseLocalMediaFolder} disabled={busy}>
+              Choose local save folder
+            </button>
+            <span className="muted">{localMediaDirectoryName || 'No local folder selected'}</span>
+          </div>
           <button
             className="upload-submit"
             onClick={create}
             disabled={
               busy ||
               !title ||
+              !localMediaDirectoryName ||
               (!files.length && !youtubeUrl.trim()) ||
               (files.length && youtubeUrl.trim())
             }
@@ -193,6 +208,7 @@ export default function DashboardPage({ data, actions }) {
                 ? "Transcribe YouTube link"
                 : "Create & upload"}
           </button>
+          {localMediaCopyStatus && <p className="muted" role="status" aria-live="polite">{localMediaCopyStatus}…</p>}
           {uploadProgress && (
             <div
               className="upload-transfer-progress"

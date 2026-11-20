@@ -22,6 +22,14 @@ import {
 } from "../components/AppChrome.jsx";
 import { isPodcastJobActive } from "../components/PodcastJobProgress.jsx";
 import { isSupportedExportFormat } from "../components/TranscriptPanel.jsx";
+import {
+  chooseLocalMediaDirectory,
+  copyAuthenticatedFileToDirectory,
+  getPodcastDirectoryForWrite,
+  rememberPodcastDirectory,
+  safeMediaFilename,
+  writeBlobToDirectory,
+} from "../utils/localMediaStorage.js";
 import DashboardPage from "./DashboardPage.jsx";
 import PodcastDetailPage from "./PodcastDetailPage.jsx";
 import TeamPage from "./TeamPage.jsx";
@@ -117,6 +125,9 @@ export default function App() {
   const [editingUser, setEditingUser] = useState(null);
   const [title, setTitle] = useState("");
   const [files, setFiles] = useState([]);
+  const [localMediaDirectory, setLocalMediaDirectory] = useState(null);
+  const [localMediaDirectoryName, setLocalMediaDirectoryName] = useState('');
+  const [localMediaCopyStatus, setLocalMediaCopyStatus] = useState('');
   const [uploadLimits, setUploadLimits] = useState(null);
   const [uploadProgress, setUploadProgress] = useState(null);
   const [youtubeUrl, setYoutubeUrl] = useState("");
@@ -222,6 +233,17 @@ export default function App() {
       );
     } finally {
       setPodcastsLoaded(true);
+    }
+  }
+
+  async function chooseLocalMediaFolder() {
+    try {
+      const directoryHandle = await chooseLocalMediaDirectory();
+      setLocalMediaDirectory(directoryHandle);
+      setLocalMediaDirectoryName(directoryHandle.name);
+      setError('');
+    } catch (e) {
+      if (e.name !== 'AbortError') setError(e.message || 'Could not access the selected local folder');
     }
   }
 
@@ -685,6 +707,10 @@ export default function App() {
       setError(uploadError);
       return;
     }
+    if (!localMediaDirectory) {
+      setError('Choose a local destination folder before creating the project.');
+      return;
+    }
     setBusy(true);
     setUploadProgress(null);
     let podcast;
@@ -703,9 +729,8 @@ export default function App() {
           })
         ).data;
         podcast = result.podcast;
-        setError(
-          "YouTube transcription queued. Media will not be saved locally.",
-        );
+        await rememberPodcastDirectory(podcast._id, localMediaDirectory);
+        setError('YouTube transcription queued. The source video and rendered clips will be saved to this folder when downloaded.');
       } else {
         podcast = (
           await api.post("/podcasts", {
@@ -717,11 +742,14 @@ export default function App() {
               .filter(Boolean),
           })
         ).data;
+        await rememberPodcastDirectory(podcast._id, localMediaDirectory);
         podcast = await uploadResumableFiles(
           podcast._id,
           files,
           sourceKind,
           speakerKey,
+          localMediaDirectory,
+          title,
         );
         uploadCompleted = true;
         const { data: job } = await api.post(
@@ -743,6 +771,8 @@ export default function App() {
       setProjectTags("");
       setFiles([]);
       setYoutubeUrl("");
+      setLocalMediaDirectory(null);
+      setLocalMediaDirectoryName('');
       setUploadProgress(null);
       await load();
       setSelected(podcast);
@@ -769,22 +799,25 @@ export default function App() {
     }
   }
 
-  async function uploadResumableFiles(podcastId, selectedFiles, kind, speaker) {
+  async function uploadResumableFiles(podcastId, selectedFiles, kind, speaker, directoryHandle, podcastTitle) {
     const uploads = [...selectedFiles];
     const totalBytes = uploads.reduce((total, file) => total + file.size, 0);
     let completedBytes = 0;
     for (const file of uploads) {
-      const { data: session } = await api.post(
-        `/podcasts/${podcastId}/uploads`,
-        {
-          name: file.name,
-          size: file.size,
-          mimeType:
-            file.type || (kind === "video" ? "video/mp4" : "audio/mpeg"),
-          kind,
-          speaker,
-        },
-      );
+      const sourceName = safeMediaFilename(`${podcastTitle} - ${file.name}`);
+      setLocalMediaCopyStatus(`Saving a local copy of ${file.name}`);
+      try {
+        await writeBlobToDirectory(directoryHandle, sourceName, file);
+      } finally {
+        setLocalMediaCopyStatus('');
+      }
+      const { data: session } = await api.post(`/podcasts/${podcastId}/uploads`, {
+        name: file.name,
+        size: file.size,
+        mimeType: file.type || (kind === 'video' ? 'video/mp4' : 'audio/mpeg'),
+        kind,
+        speaker,
+      });
       if (session.complete) {
         completedBytes += file.size;
         setUploadProgress({
@@ -880,19 +913,21 @@ export default function App() {
       setError(uploadError);
       return;
     }
+    if (!localMediaDirectory) {
+      setError('Choose a local destination folder before uploading these tracks.');
+      return;
+    }
     setBusy(true);
     setUploadProgress(null);
     try {
-      await uploadResumableFiles(
-        selected._id,
-        extraFiles,
-        sourceKind,
-        speakerKey,
-      );
+      await rememberPodcastDirectory(selected._id, localMediaDirectory);
+      await uploadResumableFiles(selected._id, extraFiles, sourceKind, speakerKey, localMediaDirectory, selected.title);
       setExtraFiles([]);
       await refresh();
       setUploadProgress(null);
-      setError("Source tracks uploaded. Use the speaker key in Camera plan.");
+      setLocalMediaDirectory(null);
+      setLocalMediaDirectoryName('');
+      setError('Source tracks uploaded. Use the speaker key in Camera plan.');
     } catch (e) {
       setUploadProgress(null);
       setError(e.response?.data?.error || e.message);
@@ -1348,20 +1383,31 @@ export default function App() {
   }
 
   async function downloadClip(id) {
+    setBusy(true);
     try {
-      const response = await api.get(`/podcasts/clips/${id}/render`, {
-        responseType: "blob",
-      });
-      const url = URL.createObjectURL(response.data);
-      const link = document.createElement("a");
-      link.href = url;
-      link.download = `clip-${id}.mp4`;
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-      URL.revokeObjectURL(url);
+      const directoryHandle = await getPodcastDirectoryForWrite(selected._id);
+      setLocalMediaDirectory(directoryHandle);
+      setLocalMediaDirectoryName(directoryHandle.name);
+      const clip = clips.find(item => item._id === id);
+      const savedFiles = [];
+      if (selected.sourceUrl) {
+        savedFiles.push(await copyAuthenticatedFileToDirectory(
+          directoryHandle,
+          `/api/podcasts/${selected._id}/youtube-source`,
+          safeMediaFilename(`${selected.title} - source.mp4`),
+        ));
+      }
+      const response = await api.get(`/podcasts/clips/${id}/render`, { responseType: 'blob' });
+      savedFiles.push(await writeBlobToDirectory(
+        directoryHandle,
+        safeMediaFilename(`${selected.title} - clip-${id}-v${clip?.renderVersion || 1}.mp4`),
+        response.data,
+      ));
+      setError(`Saved ${savedFiles.length === 1 ? 'media file' : 'media files'} to "${directoryHandle.name}": ${savedFiles.join(', ')}`);
     } catch (e) {
-      setError(e.response?.data?.error || "Rendered download unavailable");
+      setError(e.response?.data?.error || e.message || 'Rendered download unavailable');
+    } finally {
+      setBusy(false);
     }
   }
 
@@ -1476,6 +1522,8 @@ export default function App() {
           localStorage.removeItem("cf_token");
           setToken(null);
           setCurrentUser(null);
+          setLocalMediaDirectory(null);
+          setLocalMediaDirectoryName('');
           setShowWelcome(false);
           setShowBrandIntro(true);
           setPage("dashboard");
@@ -1553,6 +1601,8 @@ export default function App() {
               sourceKind,
               speakerKey,
               files,
+              localMediaDirectoryName,
+              localMediaCopyStatus,
               uploadLimits,
               uploadProgress,
               busy,
@@ -1587,6 +1637,7 @@ export default function App() {
               setSourceKind,
               setSpeakerKey,
               setFiles,
+              chooseLocalMediaFolder,
               create,
               toggleSelectAllPodcasts,
               deleteSelectedPodcasts,
@@ -1636,6 +1687,8 @@ export default function App() {
               sourceKind,
               speakerKey,
               extraFiles,
+              localMediaDirectoryName,
+              localMediaCopyStatus,
               transcriptLines,
               transcriptVisible,
               hasTranscript,
@@ -1651,6 +1704,7 @@ export default function App() {
               setSourceKind,
               setSpeakerKey,
               setExtraFiles,
+              chooseLocalMediaFolder,
               stopPodcastJob,
               stopGeneration,
               restartPodcastJob,
