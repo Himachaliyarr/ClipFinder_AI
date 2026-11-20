@@ -37,6 +37,7 @@ export default function PodcastDetailPage({ data, actions }) {
     restartPodcastJob,
     transcribe,
     generateStories,
+    generateClipSuggestions,
     generateOpusClips,
     uploadMore,
     setExportFormat,
@@ -245,6 +246,13 @@ export default function PodcastDetailPage({ data, actions }) {
         </button>
         {hasTranscript && (
           <>
+            <button
+              className="secondary"
+              onClick={generateClipSuggestions}
+              disabled={busy || isPodcastJobActive(selected?.status)}
+            >
+              {clips.length ? 'Regenerate reel suggestions' : 'Generate reel suggestions'}
+            </button>
             <button
               className="secondary"
               onClick={generateStories}
