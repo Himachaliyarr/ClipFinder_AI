@@ -7,6 +7,7 @@ import PodcastJobProgress, {
 } from '../components/PodcastJobProgress.jsx';
 import TranscriptPanel from '../components/TranscriptPanel.jsx';
 import ClipSentenceEditor from '../components/ClipSentenceEditor.jsx';
+import { isPodcastJobQueuedTooLong } from '../utils/podcastJobs.js';
 
 // Podcast processing, transcript, story, and clip controls belong to the detail page.
 export default function PodcastDetailPage({ data, actions }) {
@@ -79,6 +80,7 @@ export default function PodcastDetailPage({ data, actions }) {
   const hasSource = Boolean(selected?.sourceUrl || selected?.sourceFiles?.length);
   const momentsReady = Boolean(selected?.storyMoments?.length);
   const needsReview = clips.filter(clip => clip.status === 'suggested').length;
+  const queuedTooLong = isPodcastJobQueuedTooLong(selected || {});
   const renderedClips = clips.filter(clip => clip.renderStatus === 'completed');
   const sourceVideos = (selected?.sourceFiles || []).filter(file => file.kind === 'video');
   const allVisibleClipsSelected = filteredClips.length > 0
@@ -243,8 +245,8 @@ export default function PodcastDetailPage({ data, actions }) {
             />
           )}
         </div>
-        <button onClick={transcribe} disabled={busy || !selected?.sourceFiles?.length || ['downloading', 'queued', 'processing'].includes(selected?.status)}>
-          {busy ? 'Starting…' : 'Start transcription'}
+        <button onClick={transcribe} disabled={busy || !selected?.sourceFiles?.length || ['downloading', 'processing'].includes(selected?.status) || (selected?.status === 'queued' && !queuedTooLong)}>
+          {busy ? 'Starting…' : queuedTooLong ? 'Retry queued transcription' : selected?.status === 'queued' ? 'Transcription queued' : ['downloading', 'processing'].includes(selected?.status) ? 'Transcription running' : 'Start transcription'}
         </button>
         {hasTranscript && (
           <>
@@ -298,8 +300,8 @@ export default function PodcastDetailPage({ data, actions }) {
       </nav>
       <section className="create sourceupload" id="source-upload">
         <div>
-          <h3>Add camera / audio track</h3>
-          <p className="muted">Upload one speaker camera at a time and assign its stable key.</p>
+          <h3>Add optional camera / audio tracks</h3>
+          <p className="muted">The initial project upload is already used for transcription. Add only extra camera angles, speaker mics, or a master mix here.</p>
         </div>
         <select aria-label="Additional track type" value={sourceKind} onChange={event => setSourceKind(event.target.value)}>
           <option value="video">Camera video</option>

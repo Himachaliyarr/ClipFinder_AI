@@ -337,6 +337,22 @@ r.post('/:id/transcribe', auth, allow('admin','editor'), wrap(async (req, res) =
   const p = await Podcast.findById(req.params.id);
   if (!p) return res.status(404).json({ error: 'Podcast not found' });
   if (!p.sourceFiles.length) return res.status(400).json({ error: 'Upload media first' });
+  if (['downloading','queued','processing'].includes(p.status) && p.jobId) {
+    const currentJob = await mediaQueue.getJob(p.jobId);
+    if (currentJob) {
+      const state = await currentJob.getState();
+      if (['waiting','active','delayed','paused','waiting-children'].includes(state)) {
+        return res.status(202).json({
+          message: state === 'active'
+            ? 'Transcription is already running'
+            : 'Transcription is queued. Check that Redis and the media worker are running.',
+          podcastId: p.id,
+          jobId: currentJob.id,
+          state,
+        });
+      }
+    }
+  }
   p.status = 'queued'; p.error = undefined; await p.save();
   try {
     const job = await enqueueTranscription(p.id, req.user.id);

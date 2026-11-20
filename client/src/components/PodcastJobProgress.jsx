@@ -1,3 +1,5 @@
+import { isPodcastJobQueuedTooLong } from '../utils/podcastJobs.js';
+
 // Shared status controls keep podcast cards and detail pages in sync.
 export function isPodcastJobActive(status) {
   return ['downloading', 'queued', 'processing'].includes(status);
@@ -30,11 +32,17 @@ export function getJobStatusMessage(status) {
 export default function PodcastJobProgress({ podcast, busy, onStop, onRestart, compact = false }) {
   const active = isPodcastJobActive(podcast.status);
   const progress = getPodcastProgress(podcast);
+  const queuedTooLong = isPodcastJobQueuedTooLong(podcast);
 
   return (
     <div className="jobprogress" style={compact ? { minWidth: 0 } : undefined}>
       <span>{podcast.jobMessage || getJobStatusMessage(podcast.status)} · {progress}%</span>
       <progress aria-label="Podcast processing progress" max="100" value={progress} />
+      {queuedTooLong && (
+        <p className="muted" role="status">
+          Still waiting for the media worker. Check Redis with <code>docker compose up -d redis</code>; <code>npm run dev</code> starts the worker in development.
+        </p>
+      )}
       {podcast.jobId && active && (
         <button
           className="secondary"

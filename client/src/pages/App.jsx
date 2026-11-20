@@ -496,7 +496,8 @@ export default function App() {
   }
 
   async function create() {
-    const uploadError = youtubeUrl.trim() ? '' : validateUpload(files);
+    const isYoutube = Boolean(youtubeUrl.trim());
+    const uploadError = isYoutube ? '' : validateUpload(files);
     if (uploadError) {
       setError(uploadError);
       return;
@@ -508,8 +509,10 @@ export default function App() {
     setBusy(true);
     setUploadProgress(null);
     let podcast;
+    let uploadComplete = false;
+    let transcriptionWarning = '';
     try {
-      if (youtubeUrl.trim()) {
+      if (isYoutube) {
         const result = (await api.post('/podcasts/youtube', {
           title,
           url: youtubeUrl.trim(),
@@ -517,8 +520,8 @@ export default function App() {
           tags: projectTags.split(',').map(tag => tag.trim()).filter(Boolean),
         })).data;
         podcast = result.podcast;
+        uploadComplete = true;
         await rememberPodcastDirectory(podcast._id, localMediaDirectory);
-        setError('YouTube transcription queued. The source video and rendered clips will be saved to this folder when downloaded.');
       } else {
         podcast = (await api.post('/podcasts', {
           title,
@@ -527,6 +530,12 @@ export default function App() {
         })).data;
         await rememberPodcastDirectory(podcast._id, localMediaDirectory);
         await uploadResumableFiles(podcast._id, files, sourceKind, speakerKey, localMediaDirectory, title);
+        uploadComplete = true;
+        try {
+          await api.post(`/podcasts/${podcast._id}/transcribe`);
+        } catch (e) {
+          transcriptionWarning = e.response?.data?.error || e.message;
+        }
       }
 
       setTitle('');
@@ -538,13 +547,25 @@ export default function App() {
       setLocalMediaDirectoryName('');
       setUploadProgress(null);
       await load();
-      setSelected(podcast);
+      const [detail, podcastClips] = await Promise.all([
+        api.get(`/podcasts/${podcast._id}`),
+        api.get(`/podcasts/${podcast._id}/clips`),
+      ]);
+      setSelected(detail.data);
+      setClips(podcastClips.data);
       setPage('detail');
+      setError(transcriptionWarning
+        ? `Upload completed, but transcription could not be queued: ${transcriptionWarning}. Use Start transcription in the project to retry.`
+        : isYoutube
+          ? 'YouTube transcription is queued. The source video and rendered clips can be saved to your chosen folder after rendering.'
+          : 'Upload complete. Transcription and AI reel suggestions are processing.');
     } catch (e) {
       setUploadProgress(null);
-      if (podcast && !youtubeUrl.trim()) {
+      if (podcast && !isYoutube) {
         await load();
-        setError(`${e.response?.data?.error || e.message}. Project was created; open it and reselect the same file to resume.`);
+        setError(uploadComplete
+          ? `Upload completed, but the project could not be opened: ${e.response?.data?.error || e.message}. Open it from the dashboard; transcription may still be running.`
+          : `${e.response?.data?.error || e.message}. Project was created; open it and reselect the same file to resume.`);
       } else {
         setError(e.response?.data?.error || e.message);
       }
@@ -675,8 +696,9 @@ export default function App() {
   async function transcribe() {
     setBusy(true);
     try {
-      await api.post(`/podcasts/${selected._id}/transcribe`);
-      setError('Transcription job accepted. Refresh after processing.');
+      const { data } = await api.post(`/podcasts/${selected._id}/transcribe`);
+      setError(data.message || 'Transcription job accepted.');
+      await refresh();
     } catch (e) {
       setError(e.response?.data?.error || e.message);
     } finally {

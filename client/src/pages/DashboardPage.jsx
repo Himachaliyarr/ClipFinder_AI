@@ -64,7 +64,7 @@ export default function DashboardPage({ data, actions }) {
         <div>
           <span className="eyebrow">AI VIDEO WORKFLOW</span>
           <h2>Turn long podcasts into<br />short-form moments.</h2>
-          <p>Upload source footage, transcribe it, then review AI-selected clips.</p>
+          <p>Upload source footage once. Transcription and AI-selected clips start automatically; add extra tracks only when needed.</p>
         </div>
         <div className="heroicon"><Clapperboard size={64} /></div>
       </section>
@@ -74,7 +74,7 @@ export default function DashboardPage({ data, actions }) {
             <span className="eyebrow">START A PROJECT</span>
             <h3 id="new-podcast-heading">New podcast</h3>
             <p className="muted">Upload a video or paste a YouTube link. A YouTube source is downloaded when rendering and copied to your chosen folder when you save a rendered clip.</p>
-            <p className="muted">Choose a local folder for source files and downloaded renders. Files are also kept on the processing server.</p>
+            <p className="muted">The first upload starts transcription and clip suggestions automatically. Choose a local folder for your source copy and downloaded renders; processing copies also stay on the server.</p>
             {uploadLimits && (
               <p className="muted">Upload limit: {uploadLimits.maxFiles} files per request, up to {Math.ceil((uploadLimits.maxResumableFileBytes || uploadLimits.maxFileBytes) / 1024 ** 3)} GiB each. Large files resume in chunks.</p>
             )}
@@ -133,7 +133,7 @@ export default function DashboardPage({ data, actions }) {
             onClick={create}
             disabled={busy || !title || !localMediaDirectoryName || (!files.length && !youtubeUrl.trim()) || (files.length && youtubeUrl.trim())}
           >
-            <Upload size={16} /> {busy ? 'Creating…' : youtubeUrl.trim() ? 'Transcribe YouTube link' : 'Create & upload'}
+            <Upload size={16} /> {busy ? 'Creating…' : youtubeUrl.trim() ? 'Transcribe YouTube link' : 'Upload & transcribe'}
           </button>
           {localMediaCopyStatus && <p className="muted" role="status" aria-live="polite">{localMediaCopyStatus}…</p>}
           {uploadProgress && (

@@ -40,6 +40,8 @@ BullMQ transcription/render jobs, speaker-keyed camera plans, branded ASS captio
 
 In desktop Chrome or Edge over HTTPS (or localhost), choose a destination folder before creating a project. Uploaded audio/video is copied to that folder on the user's computer and also uploaded to `MEDIA_ROOT` for processing. The app remembers the folder handle in that browser; access may need to be granted again after restarting the browser. Additional source tracks can use a newly selected folder. Use **Save to local folder** on a rendered clip to save the MP4; for YouTube projects this also copies the source video after it has been downloaded for rendering. The server-side processing copy remains available to the workspace.
 
+For local uploads, the first upload automatically queues transcription and AI clip suggestions after all files finish uploading. The **Add optional camera / audio tracks** section is only for extra camera angles, speaker mic tracks, or a master mix; it is not required to start transcription.
+
 ## Requirements
 
 - Node.js 20+
@@ -57,10 +59,9 @@ In desktop Chrome or Edge over HTTPS (or localhost), choose a destination folder
 3. Start Redis and MongoDB: `docker compose up -d`. If MongoDB is already installed locally on port 27017, use that service and start only Redis (`docker compose up -d redis`) to avoid a port conflict.
 4. Install packages: `npm install`.
 5. Confirm the configured `FFMPEG_PATH` points to an installed FFmpeg executable, `ffprobe` is available, and `MEDIA_ROOT` is writable by both API and worker.
-6. Start API and UI: `npm run dev`. The server creates or synchronizes the admin account from the three `ADMIN_*` values on startup; these are the admin's login credentials.
-7. Start the durable media worker in a second terminal: `npm run worker`.
-8. Sign in with `ADMIN_EMAIL` and `ADMIN_PASSWORD`. Create a podcast by uploading media or pasting a YouTube video link. YouTube downloads, transcription, and AI clip selection are queued automatically; only import videos you own or have permission to use. For uploaded media, select **Start transcription** to run transcription and clip selection. If a transcript already exists without suggestions, choose **Generate AI reel suggestions** to reuse it without repeating transcription. For clip output, adjust In/Out, configure a speaker camera plan, then select **Render 9:16**.
-9. Open http://localhost:5173.
+6. Start the API, UI, and media worker together: `npm run dev`. The server creates or synchronizes the admin account from the three `ADMIN_*` values on startup; these are the admin's login credentials.
+7. Sign in with `ADMIN_EMAIL` and `ADMIN_PASSWORD`. Create a podcast by uploading media or pasting a YouTube video link. YouTube transcription and AI clip selection are queued automatically; only import videos you own or have permission to use. For uploaded media, transcription and clip suggestions start automatically after upload; if processing failed or you need to rerun it, select **Start transcription**. If a transcript already exists without suggestions, choose **Generate AI reel suggestions** to reuse it without repeating transcription. For clip output, adjust In/Out, configure a speaker camera plan, then select **Render 9:16**.
+8. Open http://localhost:5173.
 
 Admins can manage team roles from **Team & audit**. Enter actual provider costs and published views/watch time in the podcast/clip review screens; the dashboard does not estimate provider billing or fetch social-media analytics automatically.
 
