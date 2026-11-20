@@ -687,12 +687,43 @@ r.get('/analytics/activity', auth, allow('admin'), wrap(async (req, res) => {
     .limit(100)
     .populate('user', 'name email')
     .lean();
+  const idsFor = entityType => [...new Set(events
+    .filter(event => event.entityType === entityType && validId(event.entityId))
+    .map(event => String(event.entityId)))];
+  const [podcasts, clips, users] = await Promise.all([
+    Podcast.find({ _id: { $in: idsFor('Podcast') } }).select('title').lean(),
+    Clip.find({ _id: { $in: idsFor('Clip') } }).select('title podcast').lean(),
+    User.find({ _id: { $in: idsFor('User') } }).select('name').lean(),
+  ]);
+  const clipPodcastIds = [...new Set(clips.map(clip => String(clip.podcast)).filter(validId))];
+  const clipPodcasts = await Podcast.find({ _id: { $in: clipPodcastIds } }).select('title').lean();
+  const podcastTitles = new Map([...podcasts, ...clipPodcasts].map(podcast => [String(podcast._id), podcast.title]));
+  const clipTitles = new Map(clips.map(clip => [String(clip._id), clip]));
+  const userNames = new Map(users.map(user => [String(user._id), user.name]));
   res.json(events.map(event => {
     const details = event.details && typeof event.details === 'object' && !Array.isArray(event.details)
       ? { ...event.details }
       : event.details;
     if (details && typeof details === 'object') delete details.renderPath;
-    return { ...event, details };
+    const entityId = String(event.entityId || '');
+    let location = event.entityType || 'Workspace';
+    if (event.entityType === 'Podcast') {
+      location = `Podcast${podcastTitles.has(entityId) ? ` / ${podcastTitles.get(entityId)}` : ''}`;
+    } else if (event.entityType === 'Clip') {
+      const clip = clipTitles.get(entityId);
+      const podcastTitle = clip ? podcastTitles.get(String(clip.podcast)) : null;
+      location = `${podcastTitle ? `Podcast / ${podcastTitle} / ` : ''}Clip${clip?.title ? ` / ${clip.title}` : ''}`;
+    } else if (event.entityType === 'User') {
+      location = `Team${userNames.has(entityId) ? ` / ${userNames.get(entityId)}` : ''}`;
+    } else if (event.entityType === 'Backup') {
+      location = 'Backup and restore';
+    }
+    const podcastName = event.entityType === 'Podcast'
+      ? podcastTitles.get(entityId)
+      : event.entityType === 'Clip'
+        ? podcastTitles.get(String(clipTitles.get(entityId)?.podcast || ''))
+        : undefined;
+    return { ...event, details, location, podcastName };
   }));
 }));
 r.delete('/analytics/activity', auth, allow('admin'), wrap(async (req, res) => {
