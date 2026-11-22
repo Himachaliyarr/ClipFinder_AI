@@ -32,7 +32,7 @@ import {
 } from "../utils/localMediaStorage.js";
 import DashboardPage from "./DashboardPage.jsx";
 import PodcastDetailPage from "./PodcastDetailPage.jsx";
-import TeamPage from "./TeamPage.jsx";
+import TeamPage, { RecentActivityPage } from "./TeamPage.jsx";
 
 function escapeHtml(value) {
   return String(value || "").replace(
@@ -88,7 +88,7 @@ export default function App() {
     const savedPage = sessionStorage.getItem("cf_workspace_page");
     const savedPodcastId = sessionStorage.getItem("cf_selected_podcast_id");
     if (savedPage === "detail" && savedPodcastId) return "detail";
-    return ["dashboard", "team"].includes(savedPage) ? savedPage : "dashboard";
+    return ["dashboard", "team", "activity"].includes(savedPage) ? savedPage : "dashboard";
   });
   const [savedPodcastId] = useState(
     () => sessionStorage.getItem("cf_selected_podcast_id") || "",
@@ -101,6 +101,7 @@ export default function App() {
   const [podcasts, setPodcasts] = useState([]);
   const [podcastsLoaded, setPodcastsLoaded] = useState(false);
   const [podcastsLoadError, setPodcastsLoadError] = useState("");
+  const [showRecentPodcasts, setShowRecentPodcasts] = useState(false);
   const [selectedPodcastIds, setSelectedPodcastIds] = useState([]);
   const [podcastSearch, setPodcastSearch] = useState("");
   const [podcastStatusFilter, setPodcastStatusFilter] = useState("all");
@@ -198,6 +199,10 @@ export default function App() {
   useEffect(() => {
     localStorage.setItem("cf_theme", theme);
   }, [theme]);
+
+  useEffect(() => {
+    if (page !== "dashboard") setShowRecentPodcasts(false);
+  }, [page]);
 
   useEffect(() => {
     sessionStorage.setItem("cf_workspace_page", page);
@@ -604,11 +609,11 @@ export default function App() {
 
   useEffect(() => {
     if (token && page === "dashboard") loadMetrics();
-    if (token && page === "team" && currentUser?.role === "admin") loadTeam();
+    if (token && ["team", "activity"].includes(page) && currentUser?.role === "admin") loadTeam();
   }, [token, page, currentUser?.role]);
 
   useEffect(() => {
-    if (page === "team" && currentUser && currentUser.role !== "admin")
+    if (["team", "activity"].includes(page) && currentUser && currentUser.role !== "admin")
       setPage("dashboard");
   }, [page, currentUser]);
 
@@ -776,6 +781,7 @@ export default function App() {
       ]);
       setSelected(detail.data);
       setClips(podcastClips.data);
+      setShowRecentPodcasts(false);
       setPage('detail');
       setError(transcriptionWarning
         ? `Upload completed, but transcription could not be queued: ${transcriptionWarning}. Use Start transcription in the project to retry.`
@@ -889,6 +895,7 @@ export default function App() {
 
   async function open(podcast) {
     closeSourcePreview();
+    setShowRecentPodcasts(false);
     setPage("detail");
     setSelected(podcast);
     setError("");
@@ -1513,8 +1520,15 @@ export default function App() {
       <WorkspaceSidebar
         page={page}
         user={currentUser}
+        showRecentPodcasts={showRecentPodcasts}
         onNavigate={(nextPage) => {
+          setShowRecentPodcasts(false);
           setPage(nextPage);
+          setError("");
+        }}
+        onToggleRecentPodcasts={() => {
+          setShowRecentPodcasts(true);
+          setPage("dashboard");
           setError("");
         }}
         onSignOut={() => {
@@ -1526,6 +1540,7 @@ export default function App() {
           setShowWelcome(false);
           setShowBrandIntro(true);
           setPage("dashboard");
+          setShowRecentPodcasts(false);
           setError("");
           setLoginError("");
         }}
@@ -1538,14 +1553,16 @@ export default function App() {
               ? selected?.title
               : page === "team"
                 ? "Team and audit log"
-                : "Podcast workspace"
+                  : page === "activity"
+                    ? "Recent activity"
+                    : "Podcast workspace"
           }
           theme={theme}
           onToggleTheme={() =>
             setTheme((current) => (current === "dark" ? "light" : "dark"))
           }
           onRefresh={
-            page === "team"
+            ["team", "activity"].includes(page)
               ? loadTeam
               : page === "dashboard"
                 ? refreshDashboard
@@ -1569,7 +1586,13 @@ export default function App() {
             </button>
           </div>
         )}
-        {page === "team" && currentUser?.role === "admin" ? (
+        {page === "activity" && currentUser?.role === "admin" ? (
+          <RecentActivityPage
+            activity={activity}
+            busy={busy}
+            onClearActivity={clearActivity}
+          />
+        ) : page === "team" && currentUser?.role === "admin" ? (
           <TeamPage
             data={{
               users,
@@ -1618,6 +1641,7 @@ export default function App() {
               allPodcastsSelected,
               selectedPodcastIds,
               canDeletePodcasts,
+              showRecentPodcasts,
               podcastsLoaded,
               podcastsLoadFailed: Boolean(podcastsLoadError),
               podcastsLoadError,

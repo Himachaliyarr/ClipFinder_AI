@@ -59,6 +59,11 @@ button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-vis
 .clip-sentence-copy span{color:#ddd;overflow-wrap:anywhere}
 .clip-sentence-actions{display:flex;gap:6px;flex-shrink:0}
 .clip-sentence-actions button{padding:7px 10px}
+.clip-word-list{display:flex;gap:5px;flex-wrap:wrap}
+.clip-word{display:inline-flex;align-items:center;gap:4px;padding:3px 5px;border:1px solid #3b3f46;border-radius:6px;background:#15171a}
+.clip-word button{border:0;padding:1px 5px;border-radius:4px;background:#30343b;color:#eee;cursor:pointer}
+.clip-word.removed{opacity:.72;border-style:dashed}
+.clip-word.removed s{color:#aaa}
 .clip-sentence-footer{justify-content:flex-start}
 .clip-sentence-footer small{flex:1 1 100%;min-height:1em}
 .app[data-theme="light"] .clip-sentence-editor{background:#f8f9fb;border-color:#e3e6ec}
@@ -224,6 +229,39 @@ input[type=file]::file-selector-button{margin-right:10px;padding:8px 11px;border
 .login form{animation:login-card-enter .6s .08s cubic-bezier(.2,.75,.25,1) both}
 @keyframes login-card-enter{from{opacity:0;transform:translateY(16px) scale(.985)}to{opacity:1;transform:translateY(0) scale(1)}}
 @media(max-width:480px){.welcome-orb{width:64px;height:64px;border-radius:21px}.welcome-subtitle{font-size:14px}}
+.nav{position:relative;overflow:hidden}
+.nav::after{content:"";position:absolute;right:8px;width:5px;height:5px;border-radius:50%;background:#eac36e;opacity:0;transform:scale(.3);transition:opacity .18s ease,transform .18s cubic-bezier(.2,.75,.25,1.2)}
+.nav.active::after{opacity:1;transform:scale(1)}
+.nav:active:not(:disabled){transform:scale(.97)!important}
+.podcast-library{animation:view-enter .38s cubic-bezier(.2,.75,.25,1) both}
+.podcast-library .library-heading,.podcast-library .podcast-filters{animation:surface-enter .34s ease both}
+.podcast-library .podcast-filters{animation-delay:.06s}
+.podcast-library .cards>.podcard{animation:card-enter .42s cubic-bezier(.2,.75,.25,1) both}
+.podcast-library .cards>.podcard:nth-child(1){animation-delay:.04s}
+.podcast-library .cards>.podcard:nth-child(2){animation-delay:.09s}
+.podcast-library .cards>.podcard:nth-child(3){animation-delay:.14s}
+.podcast-library .cards>.podcard:nth-child(4){animation-delay:.19s}
+.podcast-library .cards>.podcard:nth-child(n+5){animation-delay:.22s}
+.team-section,.activitylist{animation:view-enter .38s cubic-bezier(.2,.75,.25,1) both}
+.activitylist>.activityitem{animation:activity-enter .38s ease both}
+.activitylist>.activityitem:nth-child(2){animation-delay:.04s}
+.activitylist>.activityitem:nth-child(3){animation-delay:.08s}
+.activitylist>.activityitem:nth-child(4){animation-delay:.12s}
+.activitylist>.activityitem:nth-child(n+5){animation-delay:.16s}
+.notice{animation:notice-enter .28s cubic-bezier(.2,.75,.25,1) both}
+.empty-state{animation:view-enter .32s ease both}
+.clip-word{transition:opacity .18s ease,transform .18s ease,background-color .18s ease,border-color .18s ease}
+.clip-word.removed{animation:removed-word-enter .22s ease both}
+.clip-word:not(.removed){animation:restored-word-enter .22s ease both}
+.clip-word button:active{transform:scale(.88)}
+.selection-actions{animation:surface-enter .22s ease both}
+.podcard-title{transition:color .18s ease}
+.podcard-title:hover{color:#f0cc75}
+@keyframes view-enter{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+@keyframes notice-enter{from{opacity:0;transform:translateY(-8px) scale(.985)}to{opacity:1;transform:translateY(0) scale(1)}}
+@keyframes activity-enter{from{opacity:0;transform:translateX(-8px)}to{opacity:1;transform:translateX(0)}}
+@keyframes removed-word-enter{from{opacity:1;transform:scale(1)}to{opacity:.72;transform:scale(.96)}}
+@keyframes restored-word-enter{from{opacity:.72;transform:scale(.96)}to{opacity:1;transform:scale(1)}}
 
 .login {
   display: grid;

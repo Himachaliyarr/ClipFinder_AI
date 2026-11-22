@@ -1,10 +1,12 @@
 import React, { useEffect, useRef, useState } from "react";
 import {
+  Activity,
   Clapperboard,
   Bell,
   Eye,
   EyeOff,
   Film,
+  History,
   Moon,
   RefreshCw,
   Sparkles,
@@ -147,29 +149,57 @@ export function BrandIntroScreen({ theme }) {
   );
 }
 
-export function WorkspaceSidebar({ page, user, onNavigate, onSignOut }) {
+export function WorkspaceSidebar({
+  page,
+  user,
+  showRecentPodcasts,
+  onNavigate,
+  onToggleRecentPodcasts,
+  onSignOut,
+}) {
   return (
     <aside aria-label="Main navigation">
       <div className="brand">
         <Film /> ClipFinder <b>AI</b>
       </div>
       <button
-        className={page === "dashboard" ? "nav active" : "nav"}
-        aria-current={page === "dashboard" ? "page" : undefined}
-        aria-label="Podcasts dashboard"
+        className={page === "dashboard" && !showRecentPodcasts ? "nav active" : "nav"}
+        aria-current={page === "dashboard" && !showRecentPodcasts ? "page" : undefined}
+        aria-label="Workspace"
         onClick={() => onNavigate("dashboard")}
       >
-        <Clapperboard /> Podcasts
+        <Clapperboard /> Workspace
+      </button>
+      <button
+        className={showRecentPodcasts && page === "dashboard" ? "nav active" : "nav"}
+        type="button"
+        aria-current={showRecentPodcasts && page === "dashboard" ? "page" : undefined}
+        aria-expanded={showRecentPodcasts && page === "dashboard"}
+        aria-controls="recent-podcasts-section"
+        aria-label={showRecentPodcasts ? "Hide recent podcasts" : "Show recent podcasts"}
+        onClick={onToggleRecentPodcasts}
+      >
+        <History /> Recent podcasts
       </button>
       {user?.role === "admin" && (
-        <button
-          className={page === "team" ? "nav active" : "nav"}
-          aria-current={page === "team" ? "page" : undefined}
-          aria-label="Team and audit"
-          onClick={() => onNavigate("team")}
-        >
-          <Users /> Team &amp; audit
-        </button>
+        <>
+          <button
+            className={page === "activity" ? "nav active" : "nav"}
+            aria-current={page === "activity" ? "page" : undefined}
+            aria-label="Recent activity"
+            onClick={() => onNavigate("activity")}
+          >
+            <Activity /> Recent activity
+          </button>
+          <button
+            className={page === "team" ? "nav active" : "nav"}
+            aria-current={page === "team" ? "page" : undefined}
+            aria-label="Team and audit"
+            onClick={() => onNavigate("team")}
+          >
+            <Users /> Team &amp; audit
+          </button>
+        </>
       )}
       <div className="sidefoot">
         <span className="sidebar-user-name">{user?.name || "Vande Digital"}</span>

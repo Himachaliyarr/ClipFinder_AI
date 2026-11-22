@@ -8,34 +8,57 @@ import {
 
 function getOriginalSentences(clip, transcriptSegments) {
   return getTranscriptLinesOverlappingRange(transcriptSegments, clip.start, clip.end)
-    .map(line => ({
-      sentenceId: `${line.start}:${line.end}`,
-      start: line.start,
-      end: line.end,
-      startValue: formatEditableTimestamp(line.start),
-      endValue: formatEditableTimestamp(line.end),
-      text: line.text,
-    }));
+    .map(line => {
+      const words = (transcriptSegments || [])
+        .filter(segment => segment?.timingType === 'word'
+          && Number(segment.start) >= line.start
+          && Number(segment.end) <= line.end)
+        .map(segment => ({
+          start: Number(segment.start),
+          end: Number(segment.end),
+          text: String(segment.text || '').trim(),
+        }))
+        .filter(word => Number.isFinite(word.start) && Number.isFinite(word.end) && word.text);
+      return {
+        sentenceId: `${line.start}:${line.end}`,
+        start: line.start,
+        end: line.end,
+        startValue: formatEditableTimestamp(line.start),
+        endValue: formatEditableTimestamp(line.end),
+        text: line.text,
+        words,
+      };
+    });
 }
 
 function getSavedSentences(clip, originalSentences) {
   if (!clip.sentenceEdits?.length) return originalSentences;
-  const sentencesById = new Map(originalSentences.map(line => [line.sentenceId, line]));
-  return clip.sentenceEdits.map(edit => {
-    const matched = edit.sentenceId
-      ? sentencesById.get(edit.sentenceId)
-      : originalSentences.find(sentence => edit.start < sentence.end && edit.end > sentence.start);
-    const start = !edit.sentenceId && matched ? matched.start : Number(edit.start);
-    const end = !edit.sentenceId && matched ? matched.end : Number(edit.end);
-    return {
-      ...(matched || { text: 'Transcript sentence' }),
-      sentenceId: edit.sentenceId || matched?.sentenceId || `${start}:${end}`,
-      start,
-      end,
-      startValue: formatEditableTimestamp(start),
-      endValue: formatEditableTimestamp(end),
-    };
-  });
+  const keptRanges = clip.sentenceEdits.map(edit => ({
+    start: Number(edit.start),
+    end: Number(edit.end),
+  }));
+  return originalSentences
+    .map(sentence => {
+      const sentenceRanges = keptRanges.filter(edit => edit.start < sentence.end && edit.end > sentence.start);
+      if (!sentenceRanges.length) return null;
+      const words = sentence.words.map(word => ({
+        ...word,
+        removed: !sentenceRanges.some(range => word.start < range.end && word.end > range.start),
+      }));
+      const keptWordStarts = words.filter(word => !word.removed).map(word => word.start);
+      const keptWordEnds = words.filter(word => !word.removed).map(word => word.end);
+      const start = keptWordStarts.length ? Math.min(...keptWordStarts) : sentence.start;
+      const end = keptWordEnds.length ? Math.max(...keptWordEnds) : sentence.end;
+      return {
+        ...sentence,
+        words,
+        start,
+        end,
+        startValue: formatEditableTimestamp(start),
+        endValue: formatEditableTimestamp(end),
+      };
+    })
+    .filter(Boolean);
 }
 
 export default function ClipSentenceEditor({ clip, transcriptSegments, sourceDuration, onSave }) {
@@ -74,6 +97,19 @@ export default function ClipSentenceEditor({ clip, transcriptSegments, sourceDur
     setSentences(current => current.filter((_, sentenceIndex) => sentenceIndex !== index));
   }
 
+  function setWordRemoved(sentenceIndex, wordIndex, removed) {
+    setSentences(current => current.map((sentence, index) => (
+      index === sentenceIndex
+        ? {
+            ...sentence,
+            words: sentence.words.map((word, indexWithinSentence) => (
+              indexWithinSentence === wordIndex ? { ...word, removed } : word
+            )),
+          }
+        : sentence
+    )));
+  }
+
   async function saveSentences() {
     if (!sentences.length) {
       setMessage('Keep at least one sentence in the clip.');
@@ -104,9 +140,26 @@ export default function ClipSentenceEditor({ clip, transcriptSegments, sourceDur
       setMessage('Sentence timestamps cannot overlap.');
       return;
     }
+    const wordRanges = parsedSentences.flatMap(sentence => (
+      (sentence.words || [])
+        .filter(word => !word.removed)
+        .map(word => ({ start: word.start, end: word.end }))
+    ));
+    const hasWordLevelEdits = parsedSentences.some(sentence => sentence.words?.some(word => word.removed));
+    if (hasWordLevelEdits && !wordRanges.length) {
+      setMessage('Keep at least one word in the clip.');
+      return;
+    }
     setSaving(true);
     setMessage('');
-    const patch = buildClipSentenceEditPatch(clip, parsedSentences, originalSentences);
+    const basePatch = buildClipSentenceEditPatch(clip, parsedSentences, originalSentences);
+    const hasWordEdits = parsedSentences.some(sentence => sentence.words?.some(word => word.removed));
+    const patch = {
+      ...basePatch,
+      sentenceEdits: hasWordEdits
+        ? wordRanges.sort((a, b) => a.start - b.start)
+        : basePatch.sentenceEdits,
+    };
     try {
       const saved = await onSave(clip._id, patch);
       setMessage(saved ? 'Sentence edits saved. Render the clip to apply them.' : 'Could not save sentence edits.');
@@ -121,14 +174,14 @@ export default function ClipSentenceEditor({ clip, transcriptSegments, sourceDur
     <section className="clip-sentence-editor">
       {!open ? (
         <button className="secondary" type="button" onClick={openEditor}>
-          Edit clip sentences
+          Edit clip
         </button>
       ) : (
         <>
           <div className="clip-sentence-editor-heading">
             <div>
-              <strong>Clip sentences</strong>
-              <p className="muted">Move with the arrows or remove a sentence. Only these sentences are kept; pauses and non-transcript footage are cut.</p>
+              <strong>Clip words and sentences</strong>
+              <p className="muted">Remove words or sentences from the generated reel. The matching audio and video ranges will be cut.</p>
               {sentences.some(sentence => sentence.start < Number(clip.start) || sentence.end > Number(clip.end)) && (
                 <p className="muted">Saving will extend the clip trim to keep these sentences whole.</p>
               )}
@@ -165,7 +218,41 @@ export default function ClipSentenceEditor({ clip, transcriptSegments, sourceDur
                       />
                     </label>
                   </div>
-                  <span>{sentence.text}</span>
+                  {sentence.words?.length ? (
+                    <div className="clip-word-list" aria-label={`Words in sentence ${index + 1}`}>
+                      {sentence.words.map((word, wordIndex) => (
+                        <span className={word.removed ? 'clip-word removed' : 'clip-word'} key={`${word.start}-${word.end}-${wordIndex}`}>
+                          {word.removed ? (
+                            <>
+                              <s>{word.text}</s>
+                              <button
+                                type="button"
+                                aria-label={`Restore word ${word.text}`}
+                                onClick={() => setWordRemoved(index, wordIndex, false)}
+                                disabled={saving}
+                              >
+                                Restore
+                              </button>
+                            </>
+                          ) : (
+                            <>
+                              <span>{word.text}</span>
+                              <button
+                                type="button"
+                                aria-label={`Remove word ${word.text}`}
+                                onClick={() => setWordRemoved(index, wordIndex, true)}
+                                disabled={saving}
+                              >
+                                ×
+                              </button>
+                            </>
+                          )}
+                        </span>
+                      ))}
+                    </div>
+                  ) : (
+                    <span>{sentence.text}</span>
+                  )}
                 </div>
                 <div className="clip-sentence-actions">
                   <button

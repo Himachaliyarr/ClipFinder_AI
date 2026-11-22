@@ -1,4 +1,4 @@
-// Team account management and audit history are rendered as a dedicated page.
+// Team account management is rendered as a dedicated page.
 const activityLabels = {
   podcast_created: "Podcast created",
   podcast_organization_updated: "Podcast details updated",
@@ -62,6 +62,7 @@ function getActivitySummary(event) {
         ? `Changed ${changed.join(" and ")}.`
         : "Updated podcast organization.";
     }
+
     case "source_files_uploaded": {
       const count = Number(details.count) || 1;
       return `Uploaded ${count} ${details.kind || "source"} file${count === 1 ? "" : "s"}.`;
@@ -142,10 +143,51 @@ function getActivitySummary(event) {
   }
 }
 
+export function RecentActivityPage({ activity = [], busy = false, onClearActivity }) {
+  return (
+    <section className="team-section" aria-labelledby="recent-activity-heading">
+      <div className="activity-heading">
+        <h3 id="recent-activity-heading" className="sectiontitle">Recent activity</h3>
+        <button
+          type="button"
+          className="secondary"
+          onClick={onClearActivity}
+          disabled={busy || !activity.length}
+        >
+          Clear all activity
+        </button>
+      </div>
+      <div className="activitylist" aria-live="polite">
+        {activity.map((event) => {
+          const summary = getActivitySummary(event);
+          return (
+            <article className="activityitem" key={event._id}>
+              <div className="activityitem-heading">
+                <strong>{getActivityLabel(event.action)}</strong>
+                <span>{event.user?.name || "Unknown user"}</span>
+              </div>
+              {summary && <p>{summary}</p>}
+              {event.podcastName && (
+                <small className="muted">Podcast: {event.podcastName}</small>
+              )}
+              <small className="muted">
+                Where: {event.location || event.entityType || "Workspace"}
+              </small>
+              <time className="muted" dateTime={event.createdAt}>
+                {new Date(event.createdAt).toLocaleString()}
+              </time>
+            </article>
+          );
+        })}
+        {!activity.length && <p className="muted">No activity recorded yet.</p>}
+      </div>
+    </section>
+  );
+}
+
 export default function TeamPage({ data, actions }) {
   const {
     users,
-    activity,
     backupStatus,
     newUser,
     editingUser,
@@ -159,7 +201,6 @@ export default function TeamPage({ data, actions }) {
     updateUser,
     startEditingUser,
     recordRestoreTest,
-    clearActivity,
   } = actions;
   const backupLabel =
     backupStatus?.status === "success"
@@ -373,41 +414,6 @@ export default function TeamPage({ data, actions }) {
             <p className="muted">Add a team member using the form above.</p>
           </div>
         )}
-      </div>
-      <div className="activity-heading">
-        <h3 className="sectiontitle">Recent activity</h3>
-        <button
-          type="button"
-          className="secondary"
-          onClick={clearActivity}
-          disabled={busy || !activity.length}
-        >
-          Clear all activity
-        </button>
-      </div>
-      <div className="activitylist" aria-live="polite">
-        {activity.map((event) => {
-          const summary = getActivitySummary(event);
-          return (
-            <article className="activityitem" key={event._id}>
-              <div className="activityitem-heading">
-                <strong>{getActivityLabel(event.action)}</strong>
-                <span>{event.user?.name || "Unknown user"}</span>
-              </div>
-              {summary && <p>{summary}</p>}
-              {event.podcastName && (
-                <small className="muted">Podcast: {event.podcastName}</small>
-              )}
-              <small className="muted">
-                Where: {event.location || event.entityType || "Workspace"}
-              </small>
-              <time className="muted" dateTime={event.createdAt}>
-                {new Date(event.createdAt).toLocaleString()}
-              </time>
-            </article>
-          );
-        })}
-        {!activity.length && <p className="muted">No activity recorded yet.</p>}
       </div>
     </>
   );

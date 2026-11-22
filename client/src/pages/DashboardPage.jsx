@@ -32,6 +32,7 @@ export default function DashboardPage({ data, actions }) {
     podcastsLoaded,
     podcastsLoadFailed,
     podcastsLoadError,
+    showRecentPodcasts,
   } = data;
   const {
     setPodcastSearch,
@@ -60,7 +61,9 @@ export default function DashboardPage({ data, actions }) {
 
   return (
     <>
-      <section className="hero">
+      {!showRecentPodcasts && (
+        <>
+          <section className="hero">
         <div>
           <span className="eyebrow">AI VIDEO WORKFLOW</span>
           <h2>
@@ -229,12 +232,12 @@ export default function DashboardPage({ data, actions }) {
             </div>
           )}
         </div>
-      </section>
-      <section
-        className="metricgrid"
+          </section>
+          <section
+            className="metricgrid"
         aria-label="Production metrics"
         aria-busy={metricsLoading}
-      >
+          >
         {metricsLoading && !metrics ? (
           <div
             className="metric-skeletons"
@@ -269,11 +272,15 @@ export default function DashboardPage({ data, actions }) {
             </article>
           </>
         )}
-      </section>
-      <section
-        className="podcast-library"
-        aria-labelledby="recent-podcasts-heading"
-      >
+          </section>
+        </>
+      )}
+      {showRecentPodcasts && (
+        <section
+          id="recent-podcasts-section"
+          className="podcast-library"
+          aria-labelledby="recent-podcasts-heading"
+        >
         <div className="library-heading">
           <div>
             <h3 id="recent-podcasts-heading">Recent podcasts</h3>
@@ -467,6 +474,7 @@ export default function DashboardPage({ data, actions }) {
           </div>
         )}
       </section>
+      )}
     </>
   );
 }
