@@ -188,7 +188,7 @@ export default function ClipSentenceEditor({ clip, transcriptSegments, sourceDur
   return (
     <section className="clip-sentence-editor">
       {!open ? (
-        <button className="secondary" type="button" onClick={openEditor}>
+        <button className="secondary clip-sentence-edit-action" type="button" onClick={openEditor}>
           Edit words &amp; sentences
         </button>
       ) : (

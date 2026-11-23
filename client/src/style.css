@@ -66,6 +66,19 @@ button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-vis
 .clip-word.removed s{color:#aaa}
 .clip-sentence-footer{justify-content:flex-start}
 .clip-sentence-footer small{flex:1 1 100%;min-height:1em}
+.clip-sentence-edit-action,
+.clip-transcript-action{
+  background:#e3ad45;
+  color:#17191c;
+  border:1px solid #f2c76d;
+  box-shadow:0 6px 18px #c79b4129;
+}
+.clip-sentence-edit-action:hover,
+.clip-transcript-action:hover{
+  background:#f0c05d;
+  border-color:#ffd989;
+  color:#111318;
+}
 .app[data-theme="light"] .clip-sentence-editor{background:#f8f9fb;border-color:#e3e6ec}
 .app[data-theme="light"] .clip-sentence-list li{background:#fff;border-color:#e3e6ec}
 .app[data-theme="light"] .clip-sentence-copy span{color:#4d5563}

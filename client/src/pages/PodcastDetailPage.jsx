@@ -638,7 +638,7 @@ export default function PodcastDetailPage({ data, actions }) {
                       </small>
                     </label>
                   </div>
-                  <button className="secondary" type="button" onClick={() => jumpToTranscript(clip)}>View in transcript</button>
+                  <button className="secondary clip-transcript-action" type="button" onClick={() => jumpToTranscript(clip)}>View in transcript</button>
                   <label>Caption</label>
                   <textarea aria-label={`Caption for ${clip.title}`} defaultValue={clip.caption} onBlur={event => saveInlineClipEdit(clip, 'caption', event.target.value)} />
                   <small className={`clip-save-state caption-save-state ${clipSaveStates[clip._id]?.caption || ''}`} aria-live="polite">
