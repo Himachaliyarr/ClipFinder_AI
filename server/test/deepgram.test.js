@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { forEachConcurrent, getPcmStreamProgress, groupTranscriptSegments, parseDeepgramResponse, parseSarvamResponse, reconcileChunkSpeakerIds, removeTranscriptOverlap, transcribeAudioChunk } from '../src/services/deepgram.js';
+import { combineChunkResults, forEachConcurrent, getPcmStreamProgress, groupTranscriptSegments, parseDeepgramResponse, parseSarvamResponse, reconcileChunkSpeakerIds, removeTranscriptOverlap, transcribeAudioChunk } from '../src/services/deepgram.js';
 
 test('parses word timings and applies chunk offsets', () => {
   const parsed = parseDeepgramResponse({
@@ -157,9 +157,32 @@ test('parses Sarvam phrase timestamps with chunk offsets and duration bounds', (
   assert.equal(parsed.transcript, 'नमस्ते दुनिया');
   assert.equal(parsed.language, 'hi-IN');
   assert.deepEqual(parsed.segments, [
-    { start: 25.2, end: 25.9, text: 'नमस्ते', speaker: null, language: 'hi-IN', timingType: 'phrase' },
-    { start: 26.1, end: 27, text: 'दुनिया', speaker: null, language: 'hi-IN', timingType: 'phrase' },
+    { start: 25.2, end: 25.9, text: 'नमस्ते', speaker: null, language: 'hi-IN', timingType: 'word' },
+    { start: 26.1, end: 27, text: 'दुनिया', speaker: null, language: 'hi-IN', timingType: 'word' },
   ]);
+});
+
+test('combining chunks preserves raw word timings instead of collapsing them to sentences', () => {
+  const previousProvider=process.env.STT_PROVIDER;
+  process.env.STT_PROVIDER='deepgram';
+  try {
+    const combined=combineChunkResults([{
+      deepgram:{
+        transcript:'hello world',
+        segments:[
+          {start:1,end:1.4,text:'hello',speaker:null,language:'en',timingType:'word'},
+          {start:1.5,end:2,text:'world',speaker:null,language:'en',timingType:'word'}
+        ]
+      }
+    }],2);
+    assert.deepEqual(combined.segments,[
+      {start:1,end:1.4,text:'hello',speaker:null,language:'en',timingType:'word'},
+      {start:1.5,end:2,text:'world',speaker:null,language:'en',timingType:'word'}
+    ]);
+  } finally {
+    if(previousProvider===undefined) delete process.env.STT_PROVIDER;
+    else process.env.STT_PROVIDER=previousProvider;
+  }
 });
 
 test('transcribes each audio chunk with both Deepgram and Sarvam', async () => {

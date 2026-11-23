@@ -2,6 +2,7 @@ import { useState } from 'react';
 import {
   buildClipSentenceEditPatch,
   formatEditableTimestamp,
+  mergeTimedRanges,
   parseEditableTimestamp,
   getTranscriptLinesOverlappingRange,
 } from '../utils/transcript.js';
@@ -9,7 +10,7 @@ import {
 function getOriginalSentences(clip, transcriptSegments) {
   return getTranscriptLinesOverlappingRange(transcriptSegments, clip.start, clip.end)
     .map(line => {
-      const words = (transcriptSegments || [])
+      const timedWords = (transcriptSegments || [])
         .filter(segment => segment?.timingType === 'word'
           && Number(segment.start) >= line.start
           && Number(segment.end) <= line.end)
@@ -19,6 +20,20 @@ function getOriginalSentences(clip, transcriptSegments) {
           text: String(segment.text || '').trim(),
         }))
         .filter(word => Number.isFinite(word.start) && Number.isFinite(word.end) && word.text);
+      const fallbackText = String(line.text || '').trim();
+      const fallbackWords = fallbackText ? fallbackText.split(/\s+/).filter(Boolean) : [];
+      const durationPerWord = fallbackWords.length
+        ? (line.end - line.start) / fallbackWords.length
+        : 0;
+      const words = timedWords.length
+        ? timedWords
+        : fallbackWords.map((text, index) => ({
+            start: line.start + (durationPerWord * index),
+            end: index === fallbackWords.length - 1
+              ? line.end
+              : line.start + (durationPerWord * (index + 1)),
+            text,
+          }));
       return {
         sentenceId: `${line.start}:${line.end}`,
         start: line.start,
@@ -157,7 +172,7 @@ export default function ClipSentenceEditor({ clip, transcriptSegments, sourceDur
     const patch = {
       ...basePatch,
       sentenceEdits: hasWordEdits
-        ? wordRanges.sort((a, b) => a.start - b.start)
+        ? mergeTimedRanges(wordRanges)
         : basePatch.sentenceEdits,
     };
     try {
@@ -174,7 +189,7 @@ export default function ClipSentenceEditor({ clip, transcriptSegments, sourceDur
     <section className="clip-sentence-editor">
       {!open ? (
         <button className="secondary" type="button" onClick={openEditor}>
-          Edit clip
+          Edit words &amp; sentences
         </button>
       ) : (
         <>

@@ -152,7 +152,19 @@ export function parseSarvamResponse(data,offset=0,duration=Infinity){
       const start=Number(value)+offset,end=Number(timestamps.end_time_seconds[index])+offset;
       const text=String(timestamps.words?.[index]||timestamps.chunks?.[index]||'').trim();
       if(Number.isFinite(start)&&Number.isFinite(end)&&start>=0&&end>start&&start<duration&&text){
-        segments.push({start,end:Math.min(duration,end),text,speaker:null,language:data?.language_code||null,timingType:'phrase'});
+        const boundedEnd=Math.min(duration,end);
+        const words=text.split(/\s+/).filter(Boolean);
+        const durationPerWord=(boundedEnd-start)/Math.max(words.length,1);
+        words.forEach((word,wordIndex)=>{
+          segments.push({
+            start:start+(durationPerWord*wordIndex),
+            end:wordIndex===words.length-1?boundedEnd:start+(durationPerWord*(wordIndex+1)),
+            text:word,
+            speaker:null,
+            language:data?.language_code||null,
+            timingType:'word'
+          });
+        });
       }
     });
   }
@@ -343,14 +355,16 @@ async function* streamPcmChunks(audioUrl,signal,chunkSeconds,overlapSeconds=0){
     if(child.exitCode===null&&child.signalCode===null) child.kill();
   }
 }
-function combineChunkResults(results,duration){
+export function combineChunkResults(results,duration){
   const provider=getTranscriptionProvider();
   const deepgramResults=results.map(result=>result.deepgram).filter(Boolean);
   const sarvamResults=results.map(result=>result.sarvam).filter(Boolean);
   const deepgramTranscript=deepgramResults.map(result=>result.transcript).filter(Boolean).join(' ').trim();
   const sarvamTranscript=sarvamResults.map(result=>result.transcript).filter(Boolean).join(' ').trim();
-  const deepgramSegments=groupTranscriptSegments(deepgramResults.flatMap(result=>result.segments));
-  const sarvamSegments=sarvamResults.flatMap(result=>result.segments);
+  const deepgramSegments=deepgramResults.flatMap(result=>result.segments)
+    .filter(segment=>segment.timingType==='word');
+  const sarvamSegments=sarvamResults.flatMap(result=>result.segments)
+    .filter(segment=>segment.timingType==='word');
   return {
     transcript:deepgramTranscript||sarvamTranscript,
     deepgramTranscript,

@@ -189,6 +189,23 @@ export function getTranscriptLinesOverlappingRange(segments, start, end) {
   return getTranscriptLines(segments).filter(line => line.start < rangeEnd && line.end > rangeStart);
 }
 
+export function mergeTimedRanges(ranges) {
+  if (!Array.isArray(ranges)) return [];
+  const ordered = ranges
+    .map(range => ({ start: Number(range?.start), end: Number(range?.end) }))
+    .filter(range => Number.isFinite(range.start) && Number.isFinite(range.end) && range.end > range.start)
+    .sort((a, b) => a.start - b.start);
+  return ordered.reduce((merged, range) => {
+    const previous = merged.at(-1);
+    if (previous && range.start <= previous.end + 0.001) {
+      previous.end = Math.max(previous.end, range.end);
+    } else {
+      merged.push({ ...range });
+    }
+    return merged;
+  }, []);
+}
+
 export function buildClipSentenceEditPatch(clip, sentences, originalSentences) {
   const unchanged = sentences.length === originalSentences.length && sentences.every((sentence, index) => (
     sentence.sentenceId === originalSentences[index].sentenceId

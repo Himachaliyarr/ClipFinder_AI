@@ -14,6 +14,7 @@ import {
   getTranscriptLines,
   getTranscriptLinesInRange,
   getTranscriptLinesOverlappingRange,
+  mergeTimedRanges,
   parseClipTimecode,
   parseEditableTimestamp,
 } from '../src/utils/transcript.js';
@@ -86,6 +87,18 @@ test('preserves full sentence timestamps when the clip trim overlaps only part o
   ], 2.4, 3.5), [
     { start: 2, end: 2.9, speaker: null, text: 'This whole sentence.' },
     { start: 3, end: 3.2, speaker: null, text: 'Next.' },
+  ]);
+});
+
+test('merges kept word ranges before saving reel word edits', () => {
+  assert.deepEqual(mergeTimedRanges([
+    { start: 3.2, end: 3.5 },
+    { start: 1, end: 1.4 },
+    { start: 1.4, end: 1.8 },
+    { start: 3.5, end: 3.9 },
+  ]), [
+    { start: 1, end: 1.8 },
+    { start: 3.2, end: 3.9 },
   ]);
 });
 
