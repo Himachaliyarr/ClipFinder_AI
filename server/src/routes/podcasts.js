@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import rateLimit from 'express-rate-limit';
 import multer from 'multer';
 import path from 'node:path';
 import fs from 'node:fs';
@@ -16,6 +17,22 @@ import { getExpectedChunkLength } from '../services/resumableUpload.js';
 import { MAX_UPLOAD_BYTES, MAX_UPLOAD_FILES, MAX_RESUMABLE_UPLOAD_BYTES, UPLOAD_CHUNK_BYTES } from '../config/limits.js';
 
 const r = Router();
+const notificationLimiter = rateLimit({
+  windowMs: 60_000,
+  max: 60,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: req => String(req.user.id),
+  message: { error: 'Too many notification polling requests. Try again shortly.' },
+});
+const uploadChunkLimiter = rateLimit({
+  windowMs: 60_000,
+  max: 1200,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: req => String(req.user.id),
+  message: { error: 'Upload request limit reached. Try again shortly.' },
+});
 const root = path.resolve(process.env.MEDIA_ROOT || './server/storage');
 fs.mkdirSync(root, { recursive: true });
 const wrap = fn => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
@@ -120,7 +137,7 @@ r.get('/:id/uploads/:uploadId', auth, allow('admin','editor'), wrap(async (req, 
   if (!session) return res.status(404).json({ error: 'Upload session not found or expired' });
   res.json({ uploadId: String(session._id), offset: session.offset, size: session.size, chunkBytes: UPLOAD_CHUNK_BYTES });
 }));
-r.patch('/:id/uploads/:uploadId', auth, allow('admin','editor'), wrap(async (req, res, next) => {
+r.patch('/:id/uploads/:uploadId', auth, allow('admin','editor'), uploadChunkLimiter, wrap(async (req, res, next) => {
   if (!validId(req.params.id) || !validId(req.params.uploadId)) return res.status(400).json({ error: 'Invalid upload session id' });
   const now = new Date();
   const session = await UploadSession.findOneAndUpdate({
@@ -746,7 +763,7 @@ r.delete('/analytics/activity', auth, allow('admin'), wrap(async (req, res) => {
   const result = await Activity.deleteMany({});
   res.json({ message: 'Activity history cleared', deletedCount: result.deletedCount });
 }));
-r.get('/notifications', auth, wrap(async (req, res) => {
+r.get('/notifications', auth, notificationLimiter, wrap(async (req, res) => {
   const sinceValue = typeof req.query.since === 'string' ? new Date(req.query.since) : null;
   if (!sinceValue || !Number.isFinite(sinceValue.getTime())) {
     return res.status(400).json({ error: 'A valid since timestamp is required' });

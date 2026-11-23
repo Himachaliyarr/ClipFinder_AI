@@ -3,40 +3,12 @@ import express from 'express';
 import { randomUUID } from 'node:crypto';
 import cors from 'cors';
 import rateLimit from 'express-rate-limit';
-import bcrypt from 'bcryptjs';
 import { connectDB } from './config/db.js';
-import { User } from './models/index.js';
 import authRoutes from './routes/auth.js';
 import podcastRoutes from './routes/podcasts.js';
 
 if (!process.env.JWT_SECRET || process.env.JWT_SECRET.length < 32 || process.env.JWT_SECRET === 'replace_with_a_long_random_secret') {
   throw new Error('JWT_SECRET must be a unique random value of at least 32 characters');
-}
-
-async function configureAdminFromEnvironment() {
-  const name = process.env.ADMIN_NAME?.trim();
-  const email = process.env.ADMIN_EMAIL?.trim().toLowerCase();
-  const password = process.env.ADMIN_PASSWORD;
-  if (!name || !email || !password || password.length < 12) {
-    throw new Error('Set ADMIN_NAME, ADMIN_EMAIL, and an ADMIN_PASSWORD of at least 12 characters in the root .env');
-  }
-
-  const user = await User.findOne({ email });
-  if (user) {
-    // The environment is authoritative for the bootstrap admin on every server start.
-    let changed = false;
-    if (user.name !== name) { user.name = name; changed = true; }
-    if (user.role !== 'admin') { user.role = 'admin'; changed = true; }
-    if (!await bcrypt.compare(password, user.passwordHash)) {
-      user.passwordHash = await bcrypt.hash(password, 12);
-      changed = true;
-    }
-    if (changed) await user.save();
-    return;
-  }
-
-  await User.create({ name, email, passwordHash: await bcrypt.hash(password, 12), role: 'admin' });
-  console.log('Admin account created from environment configuration');
 }
 
 const app = express();
@@ -49,7 +21,16 @@ app.use((req, res, next) => {
   next();
 });
 app.use(express.json({ limit: '10mb' }));
-app.use(rateLimit({ windowMs: 60_000, max: 180, standardHeaders: true, legacyHeaders: false }));
+app.use(rateLimit({
+  windowMs: 60_000,
+  max: 180,
+  standardHeaders: true,
+  legacyHeaders: false,
+  skip: req =>
+    (req.method === 'GET' && req.path === '/api/podcasts/notifications') ||
+    (req.method === 'PATCH' &&
+      /^\/api\/podcasts\/[^/]+\/uploads\/[^/]+$/.test(req.path)),
+}));
 app.get('/api/health', (req, res) => res.json({ ok: true, service: 'ClipFinder AI' }));
 app.use('/api/auth', authRoutes);
 app.use('/api/podcasts', podcastRoutes);
@@ -57,7 +38,7 @@ app.use('/api/podcasts', podcastRoutes);
 // are served only through authenticated API endpoints.
 app.use((err, req, res, next) => {
   if (res.headersSent) return next(err);
-  const status = err.status || (err.code === 'LIMIT_FILE_SIZE' ? 413 : err.name === 'MulterError' ? 400 : 500);
+  const status = err.status || (err.code === 'ENOSPC' ? 507 : err.code === 'LIMIT_FILE_SIZE' ? 413 : err.name === 'MulterError' ? 400 : 500);
   console.error(JSON.stringify({
     level: 'error',
     requestId: req.requestId,
@@ -67,7 +48,9 @@ app.use((err, req, res, next) => {
     errorName: err.name || 'Error',
     message: String(err.message || 'Unknown error').slice(0, 1000),
   }));
-  const message = err.code === 'LIMIT_FILE_SIZE'
+  const message = err.code === 'ENOSPC'
+    ? 'Storage is full. Free disk space or configure MEDIA_ROOT with more capacity, then retry.'
+    : err.code === 'LIMIT_FILE_SIZE'
     ? 'A file exceeds the configured upload-size limit'
     : err.code === 'LIMIT_FILE_COUNT'
       ? 'This upload exceeds the configured file-count limit'
@@ -77,5 +60,5 @@ app.use((err, req, res, next) => {
   res.status(status).json({ error: message, requestId: req.requestId });
 });
 const port = Number(process.env.PORT || 5000);
-connectDB().then(configureAdminFromEnvironment).then(() => app.listen(port, () => console.log(`ClipFinder API running on ${port}`)))
+connectDB().then(() => app.listen(port, () => console.log(`ClipFinder API running on ${port}`)))
   .catch(err => { console.error('Startup failed:', err); process.exit(1); });

@@ -54,13 +54,13 @@ After a local upload, transcription is queued automatically when all files finis
 
 ## Quick start
 
-1. Configure `.env` with `ADMIN_NAME`, `ADMIN_EMAIL`, and a strong `ADMIN_PASSWORD` (at least 12 characters), a unique random `JWT_SECRET` of at least 32 characters, and the API key for your selected STT provider (`SARVAM_API_KEY` by default, or `STT_PROVIDER=deepgram` with `DEEPGRAM_API_KEY`). Optionally set `LLM_API_KEY`.
+1. Configure `.env` with a unique random `JWT_SECRET` of at least 32 characters and the API key for your selected STT provider (`SARVAM_API_KEY` by default, or `STT_PROVIDER=deepgram` with `DEEPGRAM_API_KEY`). Optionally set `LLM_API_KEY`.
 2. Set `MEDIA_ROOT` to a writable local path or mounted NAS directory. Keep source media off cloud storage as specified in the blueprint.
 3. Start Redis and MongoDB: `docker compose up -d`. If MongoDB is already installed locally on port 27017, use that service and start only Redis (`docker compose up -d redis`) to avoid a port conflict.
 4. Install packages: `npm install`.
 5. Confirm the configured `FFMPEG_PATH` points to an installed FFmpeg executable, `ffprobe` is available, and `MEDIA_ROOT` is writable by both API and worker.
-6. Start Docker Desktop, Redis, the API, UI, and media worker together with one command: `npm run dev:stack` (equivalent to `docker desktop start && docker compose up -d redis && npm run dev`). The server creates or synchronizes the admin account from the three `ADMIN_*` values on startup; these are the admin's login credentials.
-7. Sign in with `ADMIN_EMAIL` and `ADMIN_PASSWORD`. Create a podcast by uploading media or pasting a YouTube video link. YouTube transcription is queued automatically; only import videos you own or have permission to use. For uploaded media, transcription starts automatically after upload; if processing failed or you need to rerun it, select **Start transcription**. When the transcript is ready, select **Generate reel suggestions** if you want AI suggestions. For clip output, adjust In/Out, configure a speaker camera plan, then select **Render 9:16**.
+6. On a new database only, set `ADMIN_NAME`, `ADMIN_EMAIL`, and a strong `ADMIN_PASSWORD` (at least 12 characters) in `.env`, then run `npm --workspace server run admin:bootstrap` once to create the first administrator. Server startup does not create or modify users.
+7. Start Docker Desktop, Redis, the API, UI, and media worker together with one command: `npm run dev:stack` (equivalent to `docker desktop start && docker compose up -d redis && npm run dev`). Sign in with the account created during bootstrap or another account provisioned by an administrator. Create a podcast by uploading media or pasting a YouTube video link. YouTube transcription is queued automatically; only import videos you own or have permission to use. For uploaded media, transcription starts automatically after upload; if processing failed or you need to rerun it, select **Start transcription**. When the transcript is ready, select **Generate reel suggestions** if you want AI suggestions. For clip output, adjust In/Out, configure a speaker camera plan, then select **Render 9:16**.
 8. Open http://localhost:5173.
 
 Admins can manage team roles from **Team & audit**. Enter actual provider costs and published views/watch time in the podcast/clip review screens; the dashboard does not estimate provider billing or fetch social-media analytics automatically.
@@ -73,9 +73,9 @@ API health check: http://localhost:5000/api/health
 |---|---|
 | `MONGODB_URI` | MongoDB connection |
 | `JWT_SECRET` | JWT signing secret |
-| `ADMIN_NAME` | Name for the initial admin created when the database has no users |
-| `ADMIN_EMAIL` | Login email for the initial admin |
-| `ADMIN_PASSWORD` | Login password for the initial admin (at least 12 characters) |
+| `ADMIN_NAME` | Name used only by the explicit one-time `admin:bootstrap` command |
+| `ADMIN_EMAIL` | Login email used only by the explicit one-time `admin:bootstrap` command |
+| `ADMIN_PASSWORD` | Login password used only by the explicit one-time `admin:bootstrap` command (at least 12 characters) |
 | `SARVAM_API_KEY` | Sarvam subscription key |
 | `STT_PROVIDER` | `sarvam` (default) or `deepgram` |
 | `DEEPGRAM_API_KEY` | Deepgram API key; required only when `STT_PROVIDER=deepgram` |

@@ -863,8 +863,9 @@ export default function App() {
             lastError = error;
             if (
               error.response &&
-              error.response.status !== 409 &&
-              error.response.status < 500
+              (error.response.status === 507 ||
+                (error.response.status !== 409 &&
+                  error.response.status < 500))
             )
               throw error;
             const status = await api.get(
