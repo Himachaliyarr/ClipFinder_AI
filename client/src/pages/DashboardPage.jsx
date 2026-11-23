@@ -74,6 +74,48 @@ export default function DashboardPage({ data, actions }) {
     <>
       {!showRecentPodcasts && (
         <>
+          <section
+            className="metricgrid"
+            aria-label="Production metrics"
+            aria-busy={metricsLoading}
+          >
+            {metricsLoading && !metrics ? (
+              <div
+                className="metric-skeletons"
+                role="status"
+                aria-label="Loading production metrics"
+              >
+                {Array.from({ length: 5 }, (_, index) => (
+                  <span className="metric-skeleton" key={index} />
+                ))}
+              </div>
+            ) : (
+              <>
+                <article>
+                  <small>Podcasts</small>
+                  <strong>{metrics?.podcastCount ?? "—"}</strong>
+                </article>
+                <article>
+                  <small>AI clips</small>
+                  <strong>{metrics?.clipCount ?? "—"}</strong>
+                </article>
+                <article>
+                  <small>Editor approval</small>
+                  <strong>{metrics ? `${metrics.approvalRate}%` : "—"}</strong>
+                </article>
+                <article>
+                  <small>Published views entered</small>
+                  <strong>{metrics?.totalViews ?? "—"}</strong>
+                </article>
+                <article>
+                  <small>Average watch time</small>
+                  <strong>
+                    {metrics ? `${metrics.averageWatchTime}s` : "—"}
+                  </strong>
+                </article>
+              </>
+            )}
+          </section>
           <section className="hero">
             <div>
               <span className="eyebrow">AI VIDEO WORKFLOW</span>
@@ -329,48 +371,6 @@ export default function DashboardPage({ data, actions }) {
                 </div>
               )}
             </div>
-          </section>
-          <section
-            className="metricgrid"
-            aria-label="Production metrics"
-            aria-busy={metricsLoading}
-          >
-            {metricsLoading && !metrics ? (
-              <div
-                className="metric-skeletons"
-                role="status"
-                aria-label="Loading production metrics"
-              >
-                {Array.from({ length: 5 }, (_, index) => (
-                  <span className="metric-skeleton" key={index} />
-                ))}
-              </div>
-            ) : (
-              <>
-                <article>
-                  <small>Podcasts</small>
-                  <strong>{metrics?.podcastCount ?? "—"}</strong>
-                </article>
-                <article>
-                  <small>AI clips</small>
-                  <strong>{metrics?.clipCount ?? "—"}</strong>
-                </article>
-                <article>
-                  <small>Editor approval</small>
-                  <strong>{metrics ? `${metrics.approvalRate}%` : "—"}</strong>
-                </article>
-                <article>
-                  <small>Published views entered</small>
-                  <strong>{metrics?.totalViews ?? "—"}</strong>
-                </article>
-                <article>
-                  <small>Average watch time</small>
-                  <strong>
-                    {metrics ? `${metrics.averageWatchTime}s` : "—"}
-                  </strong>
-                </article>
-              </>
-            )}
           </section>
         </>
       )}
