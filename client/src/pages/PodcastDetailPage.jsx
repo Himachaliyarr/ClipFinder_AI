@@ -319,10 +319,10 @@ export default function PodcastDetailPage({ data, actions }) {
         <input aria-label="Speaker key" value={speakerKey ?? ''} onChange={event => setSpeakerKey(event.target.value)} placeholder="Speaker key e.g. host_a" />
         <input type="file" multiple accept="video/*,audio/*" aria-label="Additional audio or video tracks" onChange={event => setExtraFiles(event.target.files)} />
         <button type="button" className="secondary" onClick={chooseLocalMediaFolder} disabled={busy}>
-          Choose local save folder
+          Choose local save folder (optional)
         </button>
-        <span className="muted">{localMediaDirectoryName || 'Choose a destination for these tracks and later downloads.'}</span>
-        <button onClick={uploadMore} disabled={busy || !extraFiles.length || !localMediaDirectoryName || (!speakerKey && sourceKind !== 'mix')}>
+        <span className="muted">{localMediaDirectoryName || 'Local copy is optional; tracks still upload to the workspace.'}</span>
+        <button onClick={uploadMore} disabled={busy || !extraFiles.length || (!speakerKey && sourceKind !== 'mix')}>
           Upload track
         </button>
         {localMediaCopyStatus && <p className="muted" role="status" aria-live="polite">{localMediaCopyStatus}…</p>}

@@ -8,6 +8,7 @@
   ],
   "scripts": {
     "dev": "concurrently \"npm:dev:server\" \"npm:dev:client\" \"npm:dev:worker\"",
+    "dev:stack": "docker desktop start && docker compose up -d redis && npm run dev",
     "dev:server": "npm --workspace server run dev",
     "dev:client": "npm --workspace client run dev",
     "dev:worker": "npm --workspace server run worker",

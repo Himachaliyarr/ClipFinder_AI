@@ -191,9 +191,9 @@ export default function DashboardPage({ data, actions }) {
           </label>
           <div className="local-media-destination">
             <button type="button" className="secondary" onClick={chooseLocalMediaFolder} disabled={busy}>
-              Choose local save folder
+              Choose local save folder (optional)
             </button>
-            <span className="muted">{localMediaDirectoryName || 'No local folder selected'}</span>
+            <span className="muted">{localMediaDirectoryName || 'Local copy is optional; uploads still go to the workspace.'}</span>
           </div>
           <button
             className="upload-submit"
@@ -201,7 +201,6 @@ export default function DashboardPage({ data, actions }) {
             disabled={
               busy ||
               !title ||
-              !localMediaDirectoryName ||
               (!files.length && !youtubeUrl.trim()) ||
               (files.length && youtubeUrl.trim())
             }

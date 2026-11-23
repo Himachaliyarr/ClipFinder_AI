@@ -713,10 +713,6 @@ export default function App() {
       setError(uploadError);
       return;
     }
-    if (!localMediaDirectory) {
-      setError('Choose a local destination folder before creating the project.');
-      return;
-    }
     setBusy(true);
     setUploadProgress(null);
     let podcast;
@@ -737,7 +733,9 @@ export default function App() {
         ).data;
         podcast = result.podcast;
         uploadComplete = true;
-        await rememberPodcastDirectory(podcast._id, localMediaDirectory);
+        if (localMediaDirectory) {
+          await rememberPodcastDirectory(podcast._id, localMediaDirectory);
+        }
       } else {
         podcast = (
           await api.post("/podcasts", {
@@ -749,7 +747,9 @@ export default function App() {
               .filter(Boolean),
           })
         ).data;
-        await rememberPodcastDirectory(podcast._id, localMediaDirectory);
+        if (localMediaDirectory) {
+          await rememberPodcastDirectory(podcast._id, localMediaDirectory);
+        }
         await uploadResumableFiles(
           podcast._id,
           files,
@@ -808,12 +808,14 @@ export default function App() {
     const totalBytes = uploads.reduce((total, file) => total + file.size, 0);
     let completedBytes = 0;
     for (const file of uploads) {
-      const sourceName = safeMediaFilename(`${podcastTitle} - ${file.name}`);
-      setLocalMediaCopyStatus(`Saving a local copy of ${file.name}`);
-      try {
-        await writeBlobToDirectory(directoryHandle, sourceName, file);
-      } finally {
-        setLocalMediaCopyStatus('');
+      if (directoryHandle) {
+        const sourceName = safeMediaFilename(`${podcastTitle} - ${file.name}`);
+        setLocalMediaCopyStatus(`Saving a local copy of ${file.name}`);
+        try {
+          await writeBlobToDirectory(directoryHandle, sourceName, file);
+        } finally {
+          setLocalMediaCopyStatus('');
+        }
       }
       const { data: session } = await api.post(`/podcasts/${podcastId}/uploads`, {
         name: file.name,
@@ -918,14 +920,12 @@ export default function App() {
       setError(uploadError);
       return;
     }
-    if (!localMediaDirectory) {
-      setError('Choose a local destination folder before uploading these tracks.');
-      return;
-    }
     setBusy(true);
     setUploadProgress(null);
     try {
-      await rememberPodcastDirectory(selected._id, localMediaDirectory);
+      if (localMediaDirectory) {
+        await rememberPodcastDirectory(selected._id, localMediaDirectory);
+      }
       await uploadResumableFiles(selected._id, extraFiles, sourceKind, speakerKey, localMediaDirectory, selected.title);
       setExtraFiles([]);
       await refresh();
