@@ -15,17 +15,23 @@ const DEEPGRAM_CHUNK_OVERLAP_SECONDS=3;
 const PROVIDER_TIMEOUT_MS=90000;
 const YOUTUBE_TRANSCRIPTION_CONCURRENCY=2;
 
-export async function splitAudio(inputPath,outDir,signal,chunkSeconds=getChunkSeconds()){
+export async function splitAudio(inputPath,outDir,signal,chunkSeconds=getChunkSeconds(),onProgress){
   // Chunk long recordings so provider limits and retries do not require re-uploading the full file.
   await fs.promises.mkdir(outDir,{recursive:true});
   const {stdout}=await execFileAsync(ffprobePath,['-v','error','-show_entries','format=duration','-of','default=noprint_wrappers=1:nokey=1',inputPath],{signal});
   const duration=Number(stdout.trim()); if(!duration) throw new Error('Could not read audio duration; ensure ffmpeg/ffprobe is installed');
   const files=[];
+  const totalChunks=Math.ceil(duration/chunkSeconds);
   for(let start=0,index=0;start<duration;start+=chunkSeconds,index++){
     if(signal?.aborted) throw signal.reason || new Error('Audio splitting cancelled');
     const out=path.join(outDir,`chunk-${String(index).padStart(4,'0')}.mp3`);
     await execFileAsync(ffmpegPath,['-y','-ss',String(start),'-i',inputPath,'-t',String(chunkSeconds),'-vn','-ac','1','-ar',String(SAMPLE_RATE),'-b:a','48k',out],{signal});
-    files.push({path:out,offset:start,index,duration:Math.min(chunkSeconds,duration-start)});
+    const chunkDuration=Math.min(chunkSeconds,duration-start);
+    files.push({path:out,offset:start,index,duration:chunkDuration});
+    await onProgress?.({
+      progress:15+Math.floor(((start+chunkDuration)/duration)*5),
+      message:`Prepared audio chunk ${index+1} of ${totalChunks}`
+    });
   }
   return {files,duration};
 }
@@ -247,6 +253,13 @@ export function getPcmStreamProgress(chunksYielded,pendingBytes,bytesPerChunk){
   const chunkFraction=Math.min(pendingBytes/bytesPerChunk,1);
   return Math.min(90,20+chunksYielded*3+Math.floor(chunkFraction*2));
 }
+export function getChunkedTranscriptionProgress(completedChunks,totalChunks){
+  if(!Number.isSafeInteger(completedChunks)||completedChunks<0
+    ||!Number.isSafeInteger(totalChunks)||totalChunks<=0){
+    throw new RangeError('Transcription chunk counts are invalid');
+  }
+  return 20+Math.floor((Math.min(completedChunks,totalChunks)*75)/totalChunks);
+}
 export async function forEachConcurrent(iterable,concurrency,processItem,onComplete,onError){
   if(!Number.isInteger(concurrency)||concurrency<1) throw new RangeError('Concurrency must be a positive integer');
   const pending=new Set();
@@ -381,16 +394,34 @@ export function combineChunkResults(results,duration){
         : 'Deepgram word timings are grouped into sentence and speaker segments.'
   };
 }
-export async function transcribeLongAudio(audioPath,workDir,signal){
+export async function transcribeLongAudio(audioPath,workDir,signal,onProgress){
   requireProviderKeys();
   const chunkSeconds=getChunkSeconds();
-  const {files,duration}=await splitAudio(audioPath,path.join(workDir,'stt-chunks'),signal,chunkSeconds);
+  const {files,duration}=await splitAudio(
+    audioPath,
+    path.join(workDir,'stt-chunks'),
+    signal,
+    chunkSeconds,
+    onProgress
+  );
   const results=[];
-  for(const chunk of files){
+  let lastProgress=20;
+  await onProgress?.({progress:lastProgress,message:`Transcribing ${files.length} audio chunks`});
+  for(let index=0;index<files.length;index++){
+    const chunk=files[index];
     if(signal?.aborted) throw signal.reason || new Error('Transcription cancelled');
     const audio=await fs.promises.readFile(chunk.path);
     results.push(await transcribeAudioChunk(audio,chunk.offset,duration,'audio/mpeg',path.basename(chunk.path),signal,chunk.duration));
+    const progress=getChunkedTranscriptionProgress(index+1,files.length);
+    if(progress>lastProgress){
+      lastProgress=progress;
+      await onProgress?.({
+        progress,
+        message:`Transcribed audio chunk ${index+1} of ${files.length}`
+      });
+    }
   }
+  await onProgress?.({progress:98,message:'Combining transcript results'});
   return combineChunkResults(results,duration);
 }
 export async function transcribeYouTubeAudioStream(audioUrl,signal,onProgress){

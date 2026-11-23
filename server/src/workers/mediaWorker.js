@@ -218,11 +218,17 @@ async function processMediaJob(job, signal) {
     if (!audio) throw new Error('Podcast has no source audio');
     let audioPath = audio.path;
     if (audio.kind !== 'audio') {
+      await updatePodcastProgress(podcast, job, 'processing', 10, 'Extracting audio from source media', signal);
       audioPath = path.join(path.dirname(audio.path),'worker-audio.mp3');
       await run(process.env.FFMPEG_PATH||'ffmpeg',['-y','-i',audio.path,'-vn','-ac','1','-ar','16000','-b:a','64k',audioPath],signal);
     }
-    await updatePodcastProgress(podcast, job, 'processing', 25, 'Audio ready; transcribing with configured provider', signal);
-    const result = await transcribeLongAudio(audioPath,path.dirname(audio.path),signal);
+    await updatePodcastProgress(podcast, job, 'processing', 15, 'Preparing audio chunks for transcription', signal);
+    const result = await transcribeLongAudio(
+      audioPath,
+      path.dirname(audio.path),
+      signal,
+      ({ progress, message }) => updatePodcastProgress(podcast, job, 'processing', progress, message, signal),
+    );
     assertJobRunning(signal);
     const transcriptionMessage = 'Transcription complete. Generate reel suggestions when ready.';
     await Podcast.findByIdAndUpdate(podcast._id, {

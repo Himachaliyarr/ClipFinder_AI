@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { combineChunkResults, forEachConcurrent, getPcmStreamProgress, groupTranscriptSegments, parseDeepgramResponse, parseSarvamResponse, reconcileChunkSpeakerIds, removeTranscriptOverlap, transcribeAudioChunk } from '../src/services/deepgram.js';
+import { combineChunkResults, forEachConcurrent, getChunkedTranscriptionProgress, getPcmStreamProgress, groupTranscriptSegments, parseDeepgramResponse, parseSarvamResponse, reconcileChunkSpeakerIds, removeTranscriptOverlap, transcribeAudioChunk } from '../src/services/deepgram.js';
 
 test('parses word timings and applies chunk offsets', () => {
   const parsed = parseDeepgramResponse({
@@ -101,6 +101,14 @@ test('advances YouTube progress while FFmpeg is extracting a chunk', () => {
   assert.equal(getPcmStreamProgress(0, bytesPerChunk, bytesPerChunk), 22);
   assert.equal(getPcmStreamProgress(1, 0, bytesPerChunk), 23);
   assert.equal(getPcmStreamProgress(30, bytesPerChunk, bytesPerChunk), 90);
+});
+
+test('advances long-audio transcription by one percent per completed chunk when there are 75 chunks', () => {
+  const progress = Array.from({ length: 75 }, (_, index) =>
+    getChunkedTranscriptionProgress(index + 1, 75),
+  );
+
+  assert.deepEqual(progress, Array.from({ length: 75 }, (_, index) => index + 21));
 });
 
 test('transcribes streamed chunks concurrently within a bounded limit', async () => {
