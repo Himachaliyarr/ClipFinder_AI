@@ -759,6 +759,7 @@ export default function App() {
           title,
         );
         uploadComplete = true;
+        setUploadProgress(null);
         try {
           await api.post(`/podcasts/${podcast._id}/transcribe`);
         } catch (e) {
