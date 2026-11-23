@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { buildSentenceCameraPlan, getRenderDimensions, resolveRenderSources } from '../src/services/renderClip.js';
+import { buildSentenceCameraPlan, getRenderDimensions, getSpliceTransitions, resolveRenderSources } from '../src/services/renderClip.js';
 
 test('maps supported social formats to even render dimensions', () => {
   assert.deepEqual(getRenderDimensions('9:16'), { width: 1080, height: 1920 });
@@ -13,6 +13,18 @@ test('maps supported social formats to even render dimensions', () => {
 
 test('rejects unsupported render formats', () => {
   assert.throws(() => getRenderDimensions('4:3'), /Aspect ratio must be/);
+});
+
+test('crossfades adjacent kept ranges and shortens the transition for very short ranges', () => {
+  const composition = getSpliceTransitions([0.8, 0.3, 1.2]);
+  assert.deepEqual(composition.transitions.map(transition => transition.duration), [0.1, 0.1]);
+  assert.ok(Math.abs(composition.transitions[0].offset - 0.7) < 0.000001);
+  assert.ok(Math.abs(composition.transitions[1].offset - 0.9) < 0.000001);
+  assert.ok(Math.abs(composition.duration - 2.1) < 0.000001);
+
+  const shortComposition = getSpliceTransitions([0.06, 0.04]);
+  assert.equal(shortComposition.transitions[0].duration, 0.02);
+  assert.ok(Math.abs(shortComposition.duration - 0.08) < 0.000001);
 });
 
 test('builds the edited video plan in sentence order and uses the original camera map', () => {

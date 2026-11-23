@@ -17,6 +17,7 @@ if (!['libx264', 'h264_videotoolbox'].includes(videoEncoder)) throw new Error('F
 const videoCodecArgs = videoEncoder === 'libx264'
   ? ['-c:v', videoEncoder, '-preset', process.env.FFMPEG_PRESET || 'veryfast', '-crf', '20']
   : ['-c:v', videoEncoder, '-b:v', process.env.FFMPEG_VIDEO_BITRATE || '8M'];
+const SPLICE_TRANSITION_SECONDS = 0.1;
 const youtubeDownloads = new Map();
 const ffmpeg = () => process.env.FFMPEG_PATH || 'ffmpeg';
 const ffprobe = () => {
@@ -141,6 +142,78 @@ async function concatenateWithFilter(parts, outputDir, clipId, suffix, temporary
   return current[0];
 }
 
+export function getSpliceTransitions(durations, transitionSeconds = SPLICE_TRANSITION_SECONDS) {
+  let composedDuration = Number(durations[0]) || 0;
+  const transitions = [];
+  for (let index = 1; index < durations.length; index += 1) {
+    const nextDuration = Number(durations[index]) || 0;
+    const duration = Math.min(transitionSeconds, composedDuration / 2, nextDuration / 2);
+    transitions.push({ duration, offset: composedDuration - duration });
+    composedDuration += nextDuration - duration;
+  }
+  return { transitions, duration: composedDuration };
+}
+
+async function crossfadeWithFilter(parts, outputDir, clipId, suffix, temporaryFiles, track) {
+  let current = parts;
+  let durations = parts.map(part => part.duration);
+  let level = 0;
+  const isAudio = track === 'audio';
+  const extension = isAudio ? 'm4a' : 'mp4';
+
+  while (current.length > 1) {
+    const next = [];
+    const nextDurations = [];
+    for (let offset = 0; offset < current.length; offset += 8) {
+      const group = current.slice(offset, offset + 8);
+      const groupDurations = durations.slice(offset, offset + 8);
+      if (group.length === 1) {
+        next.push(group[0]);
+        nextDurations.push(groupDurations[0]);
+        continue;
+      }
+
+      const { transitions, duration } = getSpliceTransitions(groupDurations);
+      const outputPath = path.join(outputDir, `${clipId}-${nanoid(5)}-${suffix}-${level}-${offset}.${extension}`);
+      temporaryFiles.push(outputPath);
+      const filterGraph = group.map((_, index) => (
+        isAudio
+          ? `[${index}:a:0]asetpts=PTS-STARTPTS,aresample=48000[a${index}]`
+          : `[${index}:v:0]settb=AVTB,setpts=PTS-STARTPTS,format=yuv420p[v${index}]`
+      ));
+      let previousLabel = isAudio ? 'a0' : 'v0';
+      for (let index = 1; index < group.length; index += 1) {
+        const transition = transitions[index - 1];
+        const outputLabel = `${isAudio ? 'aout' : 'vout'}${index}`;
+        filterGraph.push(isAudio
+          ? `[${previousLabel}][a${index}]acrossfade=d=${transition.duration}:c1=tri:c2=tri[${outputLabel}]`
+          : `[${previousLabel}][v${index}]xfade=transition=fade:duration=${transition.duration}:offset=${transition.offset}[${outputLabel}]`);
+        previousLabel = outputLabel;
+      }
+
+      const args = ['-y'];
+      for (const part of group) args.push('-i', part.path);
+      args.push(
+        '-filter_complex', filterGraph.join(';'),
+        '-map', `[${previousLabel}]`,
+      );
+      if (isAudio) {
+        args.push('-c:a', 'aac', '-b:a', '160k', '-ar', '48000', '-ac', '2');
+      } else {
+        args.push(...videoCodecArgs, '-pix_fmt', 'yuv420p', '-an');
+      }
+      args.push(outputPath);
+      await run(ffmpeg(), args);
+      next.push({ path: outputPath, duration });
+      nextDurations.push(duration);
+    }
+    current = next;
+    durations = nextDurations;
+    level += 1;
+  }
+  return current[0];
+}
+
 async function renderEditedClip({ clip, sources, primary, speakerFiles, outputDir, output, width, height }) {
   const start = Math.max(0, Number(clip.start) || 0);
   const end = Number(clip.end);
@@ -159,22 +232,30 @@ async function renderEditedClip({ clip, sources, primary, speakerFiles, outputDi
   const temporaryFiles = [];
   try {
     const videoParts = [];
-    for (let index = 0; index < plan.length; index += 1) {
-      const segment = plan[index];
-      const part = path.join(outputDir, `${clip._id}-${nanoid(6)}-sentence-video-${index}.mp4`);
-      temporaryFiles.push(part);
-      await run(ffmpeg(), [
-        '-y', '-ss', String(start + segment.start), '-i', segment.file, '-t', String(segment.end - segment.start),
-        '-vf', `scale=${width}:${height}:force_original_aspect_ratio=increase,crop=${width}:${height},setsar=1,fps=30`,
-        '-an', ...videoCodecArgs, '-pix_fmt', 'yuv420p', part,
-      ]);
-      videoParts.push(part);
+    for (let editIndex = 0; editIndex < edits.length; editIndex += 1) {
+      const edit = edits[editIndex];
+      const editPlan = buildSentenceCameraPlan({ ...clip, sentenceEdits: [edit] }, primary.path, speakerFiles);
+      if (!editPlan.length) throw new Error('Sentence edit contains no renderable source ranges');
+      const cameraParts = [];
+      for (let segmentIndex = 0; segmentIndex < editPlan.length; segmentIndex += 1) {
+        const segment = editPlan[segmentIndex];
+        const part = path.join(outputDir, `${clip._id}-${nanoid(6)}-sentence-video-${editIndex}-${segmentIndex}.mp4`);
+        temporaryFiles.push(part);
+        await run(ffmpeg(), [
+          '-y', '-ss', String(start + segment.start), '-i', segment.file, '-t', String(segment.end - segment.start),
+          '-vf', `scale=${width}:${height}:force_original_aspect_ratio=increase,crop=${width}:${height},setsar=1,fps=30`,
+          '-an', ...videoCodecArgs, '-pix_fmt', 'yuv420p', part,
+        ]);
+        cameraParts.push(part);
+      }
+      const editVideo = await concatenateWithFilter(cameraParts, outputDir, clip._id, `edit-video-${editIndex}`, temporaryFiles, 'video');
+      videoParts.push({ path: editVideo, duration: edit.end - edit.start });
     }
-    const videoInput = await concatenateWithFilter(videoParts, outputDir, clip._id, 'sentence-video', temporaryFiles, 'video');
+    const videoInput = await crossfadeWithFilter(videoParts, outputDir, clip._id, 'sentence-video', temporaryFiles, 'video');
 
     const audioSource = sources.find(source => source.kind === 'mix') || primary;
     const hasAudio = await probeAudioSource(audioSource.path);
-    const args = ['-y', '-i', videoInput];
+    const args = ['-y', '-i', videoInput.path];
     if (hasAudio) {
       const audioParts = [];
       for (let index = 0; index < edits.length; index += 1) {
@@ -185,10 +266,10 @@ async function renderEditedClip({ clip, sources, primary, speakerFiles, outputDi
           '-y', '-ss', String(edit.start), '-i', audioSource.path, '-t', String(edit.end - edit.start),
           '-map', '0:a:0', '-vn', '-c:a', 'aac', '-b:a', '160k', '-ar', '48000', '-ac', '2', part,
         ]);
-        audioParts.push(part);
+        audioParts.push({ path: part, duration: edit.end - edit.start });
       }
-      const audioInput = await concatenateWithFilter(audioParts, outputDir, clip._id, 'sentence-audio', temporaryFiles, 'audio');
-      args.push('-i', audioInput, '-filter_complex', '[1:a:0]apad[aout]', '-map', '0:v:0', '-map', '[aout]');
+      const audioInput = await crossfadeWithFilter(audioParts, outputDir, clip._id, 'sentence-audio', temporaryFiles, 'audio');
+      args.push('-i', audioInput.path, '-map', '0:v:0', '-map', '1:a:0');
     } else {
       args.push('-map', '0:v:0', '-an');
     }
@@ -201,7 +282,7 @@ async function renderEditedClip({ clip, sources, primary, speakerFiles, outputDi
     ), 0);
     return {
       output,
-      duration: edits.reduce((total, edit) => total + edit.end - edit.start, 0),
+      duration: videoInput.duration,
       cameraSwitches,
     };
   } catch (error) {
