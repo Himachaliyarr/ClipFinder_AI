@@ -214,7 +214,7 @@ export function WorkspaceSidebar({
       )}
       <div className="sidefoot">
         <span className="sidebar-user-name" title={user?.email || undefined}>
-          {user?.email || "Signed in"}
+          {user?.name || user?.email || "Signed in"}
         </span>
         <button className="logout" onClick={onSignOut}>
           Sign out
