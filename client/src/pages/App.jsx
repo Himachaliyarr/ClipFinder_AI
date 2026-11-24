@@ -1485,6 +1485,26 @@ export default function App() {
     }
   }
 
+  async function deleteUser(user) {
+    if (
+      !window.confirm(
+        `Permanently delete ${user.name} (${user.email})? Their account and upload sessions will be removed. Clip assignments will be cleared.`,
+      )
+    )
+      return;
+    setBusy(true);
+    try {
+      const { data } = await api.delete(`/auth/users/${user._id}`);
+      setEditingUser(null);
+      setError(data.message || "Team member deleted.");
+      await loadTeam();
+    } catch (e) {
+      setError(e.response?.data?.error || "Could not delete team member");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function editCameraPlan(clip) {
     const current = JSON.stringify(clip.cameraSegments || [], null, 2);
     const raw = window.prompt(
@@ -1610,6 +1630,7 @@ export default function App() {
               createUser,
               setEditingUser,
               updateUser,
+              deleteUser,
               startEditingUser,
               recordRestoreTest,
               clearActivity,

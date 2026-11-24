@@ -20,6 +20,7 @@ const activityLabels = {
   background_job_retried: "Background job retried",
   user_created: "Team member added",
   user_updated: "Team member updated",
+  user_deleted: "Team member deleted",
   user_role_changed: "Team role changed",
   backup_restore_test_recorded: "Restore drill recorded",
 };
@@ -128,6 +129,10 @@ function getActivitySummary(event) {
     }
     case "user_created":
       return details.role ? `Added with ${details.role} role.` : "";
+    case "user_deleted":
+      return details.role
+        ? `Deleted ${details.name || "team member"} (${details.role}).`
+        : "Deleted team member.";
     case "user_role_changed":
       return `Changed role from ${details.previousRole || "unknown"} to ${details.role || "unknown"}.`;
     case "background_job_failed":
@@ -199,6 +204,7 @@ export default function TeamPage({ data, actions }) {
     createUser,
     setEditingUser,
     updateUser,
+    deleteUser,
     startEditingUser,
     recordRestoreTest,
   } = actions;
@@ -398,12 +404,22 @@ export default function TeamPage({ data, actions }) {
                 <h3>{user.name}</h3>
                 <p className="muted">{user.email}</p>
                 <span className="status">{user.role}</span>
-                <button
-                  className="secondary"
-                  onClick={() => startEditingUser(user)}
-                >
-                  Edit account
-                </button>
+                <div className="account-actions">
+                  <button
+                    className="secondary"
+                    onClick={() => startEditingUser(user)}
+                  >
+                    Edit account
+                  </button>
+                  <button
+                    type="button"
+                    className="danger"
+                    onClick={() => deleteUser(user)}
+                    disabled={busy || user._id === currentUser.id}
+                  >
+                    Delete member
+                  </button>
+                </div>
               </>
             )}
           </article>

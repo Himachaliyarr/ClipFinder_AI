@@ -3,6 +3,19 @@
   scroll-margin-top: 20px;
 }
 
+.account-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 12px;
+}
+
+.danger {
+  background: #4a2528;
+  color: #ffc0c0;
+  border: 1px solid #74383d;
+}
+
 .hero {
   min-height: 0;
   padding: 26px clamp(22px, 3vw, 34px);

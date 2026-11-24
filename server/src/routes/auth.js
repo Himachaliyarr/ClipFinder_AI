@@ -3,7 +3,7 @@ import rateLimit from "express-rate-limit";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import mongoose from "mongoose";
-import { Activity, User } from "../models/index.js";
+import { Activity, Clip, Podcast, UploadSession, User } from "../models/index.js";
 import { allow, auth } from "../middleware/auth.js";
 const r = Router();
 const authLimiter = rateLimit({
@@ -180,6 +180,47 @@ r.patch(
       details: { changedFields },
     });
     res.json({ id: user.id, name: user.name, email: user.email, role: user.role });
+  }),
+);
+r.delete(
+  "/users/:id",
+  auth,
+  allow("admin"),
+  wrap(async (req, res) => {
+    if (!mongoose.isValidObjectId(req.params.id))
+      return res.status(400).json({ error: "Invalid user id" });
+    if (String(req.user.id) === req.params.id)
+      return res.status(400).json({ error: "You cannot delete your own account" });
+
+    const user = await User.findById(req.params.id);
+    if (!user) return res.status(404).json({ error: "User not found" });
+    if (user.role === "admin") {
+      const adminCount = await User.countDocuments({ role: "admin" });
+      if (adminCount <= 1)
+        return res.status(400).json({ error: "At least one administrator account must remain" });
+    }
+
+    const deletedMember = {
+      name: user.name,
+      email: user.email,
+      role: user.role,
+    };
+    await Clip.updateMany({ assignedTo: user._id }, { $set: { assignedTo: null } });
+    await Podcast.updateMany({ createdBy: user._id }, { $unset: { createdBy: "" } });
+    await UploadSession.deleteMany({ user: user._id });
+    await Activity.create({
+      user: req.user.id,
+      action: "user_deleted",
+      entityType: "User",
+      entityId: user._id,
+      details: deletedMember,
+    });
+    await user.deleteOne();
+
+    res.json({
+      message: `${deletedMember.name} was deleted`,
+      deletedUser: { id: req.params.id, ...deletedMember },
+    });
   }),
 );
 r.patch(
