@@ -329,7 +329,12 @@ export default function PodcastDetailPage({ data, actions }) {
         {localMediaCopyStatus && <p className="muted" role="status" aria-live="polite">{localMediaCopyStatus}…</p>}
         {uploadProgress && (
           <div className="upload-transfer-progress" role="status" aria-live="polite">
-            <span>Uploading {uploadProgress.fileName} · {Math.floor(uploadProgress.loaded / 1024 ** 2)} / {Math.ceil(uploadProgress.total / 1024 ** 2)} MiB</span>
+            <span>
+              Uploading {uploadProgress.fileName} · {Math.floor(uploadProgress.loaded / 1024 ** 2)} / {Math.ceil(uploadProgress.total / 1024 ** 2)} MiB ·{" "}
+              {uploadProgress.total > 0
+                ? Math.min(100, Math.floor(uploadProgress.loaded / uploadProgress.total * 100))
+                : 0}%
+            </span>
             <progress max={uploadProgress.total} value={uploadProgress.loaded} />
           </div>
         )}
@@ -406,14 +411,6 @@ export default function PodcastDetailPage({ data, actions }) {
                               : 'Click Find story moments above to generate story cards from this transcript.'
                             : 'Transcribe the source to find story moments.'}
                 </p>
-                {hasStoryMomentJob && (
-                  <div className="async-progress">
-                    <span>{selected?.storyMomentsMessage || 'Finding story moments…'}</span>
-                    <div className="indeterminate-progress" role="progressbar" aria-label="Finding story moments" aria-valuetext="In progress">
-                      <span />
-                    </div>
-                  </div>
-                )}
               </div>
               {selected?.storyMoments?.length > 0 && (
                 <div className="transcript-actions">
@@ -681,7 +678,15 @@ export default function PodcastDetailPage({ data, actions }) {
                           ? `Re-render ${aspectRatio}`
                           : `Render ${aspectRatio}`}
                     </button>
-                    {['queued', 'processing'].includes(clip.renderStatus) && <span className="renderprogress">{clip.renderStatus} · {clip.renderProgress || 0}%</span>}
+                    {['queued', 'processing'].includes(clip.renderStatus) && (
+                      <span className="renderprogress">
+                        {clip.renderStatus === 'queued'
+                          ? 'Queued for rendering'
+                          : clip.renderProgress > 0
+                            ? `Rendering · ${Math.floor(clip.renderProgress)}%`
+                            : 'Preparing render source…'}
+                      </span>
+                    )}
                     {clip.renderStatus === 'failed' && <span className="error">{clip.renderError || 'Render failed'}</span>}
                     {clip.renderStatus === 'completed' && (
                       <>
@@ -772,8 +777,16 @@ export default function PodcastDetailPage({ data, actions }) {
                     <p className="muted">{renderDuration.toFixed(1)}s · {clip.renderSettings?.aspectRatio || aspectRatio} · {(clip.renderSettings?.outputFormat || 'mp4').toUpperCase()}</p>
                     {['queued', 'processing'].includes(clip.renderStatus) && (
                       <div className="rendered-progress">
-                        <span>{clip.renderStatus} · {clip.renderProgress || 0}%</span>
-                        <progress max="100" value={clip.renderProgress || 0} />
+                        <span>
+                          {clip.renderStatus === 'queued'
+                            ? 'Queued for rendering'
+                            : clip.renderProgress > 0
+                              ? `Rendering · ${Math.floor(clip.renderProgress)}%`
+                              : 'Preparing render source…'}
+                        </span>
+                        {clip.renderStatus === 'processing' && clip.renderProgress > 0 && (
+                          <progress max="100" value={Math.floor(clip.renderProgress)} aria-label="Clip render progress" />
+                        )}
                       </div>
                     )}
                     {clip.renderStatus === 'failed' && <p className="error">{clip.renderError || 'Render failed'}</p>}
@@ -817,14 +830,6 @@ export default function PodcastDetailPage({ data, actions }) {
                       ? 'Reel generation was stopped.'
                       : 'Reels are being generated...'}
               </p>
-              {hasOpusClipJob && (
-                <div className="async-progress">
-                  <span>{selected.opusClipStatus === 'queued' ? 'Starting reel generation…' : 'Generating your reels…'}</span>
-                  <div className="indeterminate-progress" role="progressbar" aria-label="Generating reels" aria-valuetext="In progress">
-                    <span />
-                  </div>
-                </div>
-              )}
               {selected.opusClipClips?.length ? (
                 <div className="opusclip-grid">
                   {selected.opusClipClips.map((opusClip, index) => (

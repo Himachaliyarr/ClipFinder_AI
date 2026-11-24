@@ -401,11 +401,27 @@ async function processMediaJob(job, signal) {
     if(!podcast) throw new Error('Podcast not found');
     clip.renderJobId=job.id;
     clip.renderStatus='processing';
-    clip.renderProgress=10;
+    clip.renderProgress=0;
     clip.renderError=undefined;
     await clip.save();
-    await job.updateProgress({ percent: 10, message: 'Preparing video render' });
-    const result=await renderClip({clip,podcast,settings:job.data.settings||{},signal});
+    await job.updateProgress({ percent: 0, message: 'Preparing video render' });
+    const reportRenderProgress = async percent => {
+      const progress = Math.min(99, Math.max(0, Math.floor(percent)));
+      if (progress <= clip.renderProgress) return;
+      clip.renderProgress = progress;
+      await Clip.updateOne(
+        { _id: clip._id, renderJobId: job.id, renderStatus: 'processing' },
+        { $set: { renderProgress: progress } },
+      );
+      await job.updateProgress({ percent: progress, message: `Rendering clip · ${progress}%` });
+    };
+    const result=await renderClip({
+      clip,
+      podcast,
+      settings:job.data.settings||{},
+      signal,
+      onProgress:reportRenderProgress,
+    });
     clip.renderPath=result.output;
     clip.renderVersion=(clip.renderVersion||0)+1;
     clip.renderSettings=job.data.settings||{};

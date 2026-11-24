@@ -624,7 +624,7 @@ export default function App() {
   useEffect(() => {
     if (!token || page !== "dashboard" || !hasActivePodcastJobs) return;
     // Poll only while visible dashboard jobs are active, then stop the timer.
-    const timer = setInterval(() => load(), 2500);
+    const timer = setInterval(() => load(), 1000);
     return () => clearInterval(timer);
   }, [token, page, hasActivePodcastJobs]);
 
@@ -659,7 +659,7 @@ export default function App() {
       refresh().catch((e) =>
         setError(e.response?.data?.error || "Could not refresh job status"),
       );
-    }, 2500);
+    }, 1000);
     return () => clearInterval(timer);
   }, [
     token,
@@ -853,6 +853,14 @@ export default function App() {
                 headers: {
                   "Content-Type": "application/octet-stream",
                   "Upload-Offset": String(offset),
+                },
+                onUploadProgress: event => {
+                  const loadedInChunk = Math.min(chunk.size, event.loaded || 0);
+                  setUploadProgress({
+                    fileName: file.name,
+                    loaded: completedBytes + offset + loadedInChunk,
+                    total: totalBytes,
+                  });
                 },
               },
             );

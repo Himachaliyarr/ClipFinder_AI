@@ -122,9 +122,6 @@ export function WelcomeScreen({ name }) {
         You're in, <strong>{name || "creator"}.</strong>
       </h2>
       <p className="welcome-subtitle">Let’s make something scroll-stopping.</p>
-      <div className="welcome-progress" aria-hidden="true">
-        <span />
-      </div>
     </div>
   );
 }
@@ -141,9 +138,6 @@ export function BrandIntroScreen({ theme }) {
           ClipFinder <strong>AI</strong>
         </h2>
         <p className="welcome-subtitle">Find the moments worth sharing.</p>
-        <div className="welcome-progress" aria-hidden="true">
-          <span />
-        </div>
       </div>
     </main>
   );

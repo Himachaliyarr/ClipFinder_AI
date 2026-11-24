@@ -3,7 +3,39 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { buildSentenceCameraPlan, getFinalRenderOptions, getRenderDimensions, getSpliceTransitions, resolveRenderSources } from '../src/services/renderClip.js';
+import { buildSentenceCameraPlan, getFinalRenderOptions, getProgressPercent, getRenderDimensions, getSpliceTransitions, parseFfmpegProgressLine, resolveRenderSources, runFfmpeg } from '../src/services/renderClip.js';
+
+test('parses FFmpeg timestamps and reports clamped whole-percent progress', () => {
+  assert.equal(parseFfmpegProgressLine('out_time_us=5000000'), 5);
+  assert.equal(parseFfmpegProgressLine('out_time=00:00:07.500'), 7.5);
+  assert.equal(parseFfmpegProgressLine('progress=continue'), null);
+  assert.equal(getProgressPercent(1, 100), 1);
+  assert.equal(getProgressPercent(99.9, 100), 99);
+  assert.equal(getProgressPercent(120, 100), 100);
+  assert.equal(getProgressPercent(1, 0), null);
+});
+
+test('streams whole-percent FFmpeg progress to the render callback', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'render-progress-'));
+  try {
+    const script = path.join(root, 'fake-ffmpeg.js');
+    await fs.writeFile(script, `
+      const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
+      for (const seconds of [0, 0.25, 0.5, 0.75, 1]) {
+        process.stdout.write(\`out_time_us=\${seconds * 1_000_000}\\nprogress=continue\\n\`);
+        await delay(10);
+      }
+    `);
+    const updates = [];
+    await runFfmpeg(process.execPath, [script, path.join(root, 'output.mp4')], {
+      duration: 1,
+      onProgress: fraction => updates.push(Math.floor(fraction * 100)),
+    });
+    assert.deepEqual(updates, [0, 25, 50, 75, 100]);
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
 
 test('maps supported social formats to even render dimensions', () => {
   assert.deepEqual(getRenderDimensions('9:16'), { width: 1080, height: 1920 });

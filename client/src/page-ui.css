@@ -1760,8 +1760,36 @@ a:focus-visible {
 }
 
 .rendered-results .opusclip-grid {
-  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-  margin-top: 16px;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 220px), 1fr));
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.rendered-results .generated-render-card {
+  min-width: 0;
+  padding: 11px;
+}
+
+.rendered-results .generated-render-heading {
+  display: flex;
+  min-width: 0;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.rendered-results .generated-render-heading h4 {
+  display: -webkit-box;
+  min-width: 0;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow-wrap: anywhere;
+}
+
+.rendered-results .generated-render-card > .muted {
+  margin: 6px 0 8px;
+  font-size: 11px;
 }
 
 .generated-render-card .opusclip-actions {
@@ -1772,12 +1800,22 @@ a:focus-visible {
 
 .generated-render-card .opusclip-actions button {
   min-width: 0;
-  min-height: 48px;
+  min-height: 36px;
   justify-content: center;
-  padding: 9px 8px;
+  padding: 7px;
+  font-size: 11px;
   text-align: center;
   white-space: normal;
   overflow-wrap: anywhere;
+}
+
+.rendered-results .generated-render-card .rendered-progress {
+  gap: 4px;
+  font-size: 11px;
+}
+
+.rendered-results .generated-render-card .rendered-progress progress {
+  height: 6px;
 }
 
 .rendered-results-heading h3,
@@ -1801,7 +1839,7 @@ a:focus-visible {
 
 @media (max-width: 750px) {
   .rendered-results .opusclip-grid {
-    grid-template-columns: minmax(0, 1fr);
+    grid-template-columns: repeat(auto-fill, minmax(min(100%, 220px), 1fr));
   }
 }
 

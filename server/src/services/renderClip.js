@@ -5,13 +5,122 @@ import { nanoid } from 'nanoid';
 import { downloadYouTubeVideo } from './youtube.js';
 import { normalizeSentenceEdits } from './clipSentenceEdits.js';
 
-const run = (bin, args) => new Promise((resolve, reject) => {
-  const child = spawn(bin, args, { stdio: ['ignore', 'ignore', 'pipe'] });
+export function parseFfmpegProgressLine(line) {
+  const separator = line.indexOf('=');
+  if (separator < 0) return null;
+  const key = line.slice(0, separator);
+  const value = line.slice(separator + 1);
+  if (key === 'out_time_us' || key === 'out_time_ms') {
+    const microseconds = Number(value);
+    return Number.isFinite(microseconds) ? microseconds / 1_000_000 : null;
+  }
+  if (key !== 'out_time') return null;
+  const match = value.match(/^(\d+):(\d{2}):(\d{2}(?:\.\d+)?)$/);
+  if (!match) return null;
+  return Number(match[1]) * 3600 + Number(match[2]) * 60 + Number(match[3]);
+}
+
+export function getProgressPercent(outTimeSeconds, durationSeconds) {
+  if (!Number.isFinite(outTimeSeconds) || !Number.isFinite(durationSeconds) || durationSeconds <= 0) return null;
+  return Math.floor(Math.min(100, Math.max(0, outTimeSeconds / durationSeconds * 100)));
+}
+
+const run = (bin, args, { signal, duration, onProgress } = {}) => new Promise((resolve, reject) => {
+  const trackProgress = typeof onProgress === 'function' && Number.isFinite(duration) && duration > 0;
+  const commandArgs = trackProgress
+    ? [...args.slice(0, -1), '-progress', 'pipe:1', '-nostats', '-stats_period', '0.1', args.at(-1)]
+    : args;
+  const child = spawn(bin, commandArgs, {
+    stdio: ['ignore', trackProgress ? 'pipe' : 'ignore', 'pipe'],
+    ...(signal ? { signal } : {}),
+  });
   let stderr = '';
+  let stdout = '';
+  let lastProgress = -1;
+  let progressError = null;
+  let progressQueue = Promise.resolve();
+  const reportProgress = percent => {
+    if (percent <= lastProgress) return;
+    lastProgress = percent;
+    progressQueue = progressQueue.then(() => onProgress(percent / 100)).catch(error => {
+      progressError = error;
+      child.kill();
+    });
+  };
+  if (trackProgress) {
+    child.stdout.on('data', data => {
+      stdout += data.toString();
+      const lines = stdout.split(/\r?\n/);
+      stdout = lines.pop() || '';
+      for (const line of lines) {
+        const outTime = parseFfmpegProgressLine(line);
+        const percent = outTime === null ? null : getProgressPercent(outTime, duration);
+        if (percent !== null) reportProgress(percent);
+      }
+    });
+  }
   child.stderr.on('data', d => { stderr += d.toString(); if (stderr.length > 12000) stderr = stderr.slice(-12000); });
   child.on('error', reject);
-  child.on('close', code => code === 0 ? resolve() : reject(new Error(`${bin} exited ${code}: ${stderr}`)));
+  child.on('close', async code => {
+    if (code === 0 && trackProgress) reportProgress(100);
+    await progressQueue;
+    if (progressError) reject(progressError);
+    else if (code === 0) resolve();
+    else reject(new Error(`${bin} exited ${code}: ${stderr}`));
+  });
 });
+export { run as runFfmpeg };
+
+function createWeightedProgress(weights, onProgress, start = 0, end = 1) {
+  const totalWeight = weights.reduce((sum, weight) => sum + weight, 0);
+  let completedWeight = 0;
+  return {
+    reportFor(weight) {
+      return fraction => {
+        if (totalWeight > 0) {
+          onProgress?.(start + (end - start) * (completedWeight + weight * fraction) / totalWeight);
+        }
+      };
+    },
+    complete(weight) {
+      completedWeight += weight;
+    },
+  };
+}
+
+function getGroupedWork(durations, crossfade) {
+  let current = [...durations];
+  let work = 0;
+  while (current.length > 1) {
+    const next = [];
+    for (let offset = 0; offset < current.length; offset += 8) {
+      const group = current.slice(offset, offset + 8);
+      if (group.length === 1) {
+        next.push(group[0]);
+        continue;
+      }
+      const duration = crossfade
+        ? getSpliceTransitions(group).duration
+        : group.reduce((sum, partDuration) => sum + partDuration, 0);
+      work += duration;
+      next.push(duration);
+    }
+    current = next;
+  }
+  return work;
+}
+
+function createRenderStages(definitions) {
+  const active = definitions.filter(stage => stage.active);
+  const totalWeight = active.reduce((sum, stage) => sum + stage.weight, 0);
+  let cursor = 0;
+  return Object.fromEntries(active.map(stage => {
+    const start = cursor;
+    cursor += stage.weight / totalWeight * 99;
+    const end = cursor;
+    return [stage.id, fraction => start + (end - start) * fraction];
+  }));
+}
 const videoEncoder = process.env.FFMPEG_VIDEO_ENCODER || (process.platform === 'darwin' ? 'h264_videotoolbox' : 'libx264');
 if (!['libx264', 'h264_videotoolbox'].includes(videoEncoder)) throw new Error('FFMPEG_VIDEO_ENCODER must be libx264 or h264_videotoolbox');
 const videoCodecArgs = videoEncoder === 'libx264'
@@ -115,19 +224,25 @@ async function probeAudioSource(file) {
   });
 }
 
-async function concatenateWithFilter(parts, outputDir, clipId, suffix, temporaryFiles, track) {
+async function concatenateWithFilter(parts, partDurations, outputDir, clipId, suffix, temporaryFiles, track, signal, onProgress) {
   let current = parts;
+  let durations = partDurations;
   let level = 0;
   const groupSize = 8;
   const isAudio = track === 'audio';
   const extension = isAudio ? 'm4a' : 'mp4';
+  const totalWork = getGroupedWork(durations, false);
+  let completedWork = 0;
 
   while (current.length > 1) {
     const next = [];
+    const nextDurations = [];
     for (let offset = 0; offset < current.length; offset += groupSize) {
       const group = current.slice(offset, offset + groupSize);
+      const groupDuration = durations.slice(offset, offset + groupSize).reduce((sum, duration) => sum + duration, 0);
       if (group.length === 1) {
         next.push(group[0]);
+        nextDurations.push(groupDuration);
         continue;
       }
 
@@ -152,10 +267,17 @@ async function concatenateWithFilter(parts, outputDir, clipId, suffix, temporary
         args.push(...videoCodecArgs, '-pix_fmt', 'yuv420p', '-an');
       }
       args.push(outputPath);
-      await run(ffmpeg(), args);
+      await run(ffmpeg(), args, {
+        signal,
+        duration: groupDuration,
+        onProgress: onProgress && (fraction => onProgress((completedWork + groupDuration * fraction) / totalWork)),
+      });
       next.push(outputPath);
+      nextDurations.push(groupDuration);
+      completedWork += groupDuration;
     }
     current = next;
+    durations = nextDurations;
     level += 1;
   }
   return current[0];
@@ -173,12 +295,14 @@ export function getSpliceTransitions(durations, transitionSeconds = SPLICE_TRANS
   return { transitions, duration: composedDuration };
 }
 
-async function crossfadeWithFilter(parts, outputDir, clipId, suffix, temporaryFiles, track) {
+async function crossfadeWithFilter(parts, outputDir, clipId, suffix, temporaryFiles, track, signal, onProgress) {
   let current = parts;
   let durations = parts.map(part => part.duration);
   let level = 0;
   const isAudio = track === 'audio';
   const extension = isAudio ? 'm4a' : 'mp4';
+  const totalWork = getGroupedWork(durations, true);
+  let completedWork = 0;
 
   while (current.length > 1) {
     const next = [];
@@ -222,9 +346,14 @@ async function crossfadeWithFilter(parts, outputDir, clipId, suffix, temporaryFi
         args.push(...videoCodecArgs, '-pix_fmt', 'yuv420p', '-an');
       }
       args.push(outputPath);
-      await run(ffmpeg(), args);
+      await run(ffmpeg(), args, {
+        signal,
+        duration,
+        onProgress: onProgress && (fraction => onProgress((completedWork + duration * fraction) / totalWork)),
+      });
       next.push({ path: outputPath, duration });
       nextDurations.push(duration);
+      completedWork += duration;
     }
     current = next;
     durations = nextDurations;
@@ -233,13 +362,15 @@ async function crossfadeWithFilter(parts, outputDir, clipId, suffix, temporaryFi
   return current[0];
 }
 
-async function renderEditedClip({ clip, sources, primary, speakerFiles, outputDir, output, width, height, outputFormat }) {
+async function renderEditedClip({ clip, sources, primary, speakerFiles, outputDir, output, width, height, outputFormat, signal, onProgress }) {
   const start = Math.max(0, Number(clip.start) || 0);
   const end = Number(clip.end);
   const edits = normalizeSentenceEdits(clip.sentenceEdits, start, end);
   if (!edits.length) throw new Error('At least one sentence is required for an edited clip');
   const plan = buildSentenceCameraPlan(clip, primary.path, speakerFiles);
   if (!plan.length) throw new Error('Sentence edits contain no renderable source ranges');
+  const editPlans = edits.map(edit => buildSentenceCameraPlan({ ...clip, sentenceEdits: [edit] }, primary.path, speakerFiles));
+  if (editPlans.some(editPlan => !editPlan.length)) throw new Error('Sentence edit contains no renderable source ranges');
   for (const segment of plan) {
     try {
       await fs.access(segment.file);
@@ -248,46 +379,116 @@ async function renderEditedClip({ clip, sources, primary, speakerFiles, outputDi
     }
   }
 
+  const audioSource = sources.find(source => source.kind === 'mix') || primary;
+  const hasAudio = await probeAudioSource(audioSource.path);
+  const videoSegmentDurations = editPlans.flatMap(editPlan => editPlan.map(segment => segment.end - segment.start));
+  const videoConcatWorks = editPlans
+    .filter(editPlan => editPlan.length > 1)
+    .map(editPlan => getGroupedWork(editPlan.map(segment => segment.end - segment.start), false));
+  const videoPartsDurations = edits.map(edit => edit.end - edit.start);
+  const videoCrossfadeWork = edits.length > 1 ? getGroupedWork(videoPartsDurations, true) : 0;
+  const audioSegmentDurations = hasAudio ? videoPartsDurations : [];
+  const audioCrossfadeWork = hasAudio && edits.length > 1 ? getGroupedWork(videoPartsDurations, true) : 0;
+  const stages = createRenderStages([
+    { id: 'videoSegments', weight: 40, active: videoSegmentDurations.length > 0 },
+    { id: 'videoConcat', weight: 10, active: videoConcatWorks.length > 0 },
+    { id: 'videoCrossfade', weight: 12, active: videoCrossfadeWork > 0 },
+    { id: 'audioSegments', weight: 15, active: audioSegmentDurations.length > 0 },
+    { id: 'audioCrossfade', weight: 8, active: audioCrossfadeWork > 0 },
+    { id: 'final', weight: 15, active: true },
+  ]);
+  const videoSegmentProgress = createWeightedProgress(
+    videoSegmentDurations,
+    fraction => stages.videoSegments(fraction),
+  );
+  const videoConcatProgress = createWeightedProgress(
+    videoConcatWorks,
+    fraction => stages.videoConcat(fraction),
+  );
+  const audioSegmentProgress = createWeightedProgress(
+    audioSegmentDurations,
+    fraction => stages.audioSegments(fraction),
+  );
   const temporaryFiles = [];
   try {
     const videoParts = [];
     for (let editIndex = 0; editIndex < edits.length; editIndex += 1) {
       const edit = edits[editIndex];
-      const editPlan = buildSentenceCameraPlan({ ...clip, sentenceEdits: [edit] }, primary.path, speakerFiles);
-      if (!editPlan.length) throw new Error('Sentence edit contains no renderable source ranges');
+      const editPlan = editPlans[editIndex];
       const cameraParts = [];
+      const editSegmentDurations = editPlan.map(segment => segment.end - segment.start);
       for (let segmentIndex = 0; segmentIndex < editPlan.length; segmentIndex += 1) {
         const segment = editPlan[segmentIndex];
+        const segmentDuration = editSegmentDurations[segmentIndex];
         const part = path.join(outputDir, `${clip._id}-${nanoid(6)}-sentence-video-${editIndex}-${segmentIndex}.mp4`);
         temporaryFiles.push(part);
         await run(ffmpeg(), [
           '-y', '-ss', String(start + segment.start), '-i', segment.file, '-t', String(segment.end - segment.start),
           '-vf', `scale=${width}:${height}:force_original_aspect_ratio=increase,crop=${width}:${height},setsar=1,fps=30`,
           '-an', ...videoCodecArgs, '-pix_fmt', 'yuv420p', part,
-        ]);
+        ], {
+          signal,
+          duration: segmentDuration,
+          onProgress: onProgress && videoSegmentProgress.reportFor(segmentDuration),
+        });
+        videoSegmentProgress.complete(segmentDuration);
         cameraParts.push(part);
       }
-      const editVideo = await concatenateWithFilter(cameraParts, outputDir, clip._id, `edit-video-${editIndex}`, temporaryFiles, 'video');
+      const concatWork = getGroupedWork(editSegmentDurations, false);
+      const editVideo = await concatenateWithFilter(
+        cameraParts,
+        editSegmentDurations,
+        outputDir,
+        clip._id,
+        `edit-video-${editIndex}`,
+        temporaryFiles,
+        'video',
+        signal,
+        onProgress && videoConcatProgress.reportFor(concatWork),
+      );
+      if (concatWork > 0) videoConcatProgress.complete(concatWork);
       videoParts.push({ path: editVideo, duration: edit.end - edit.start });
     }
-    const videoInput = await crossfadeWithFilter(videoParts, outputDir, clip._id, 'sentence-video', temporaryFiles, 'video');
+    const videoInput = await crossfadeWithFilter(
+      videoParts,
+      outputDir,
+      clip._id,
+      'sentence-video',
+      temporaryFiles,
+      'video',
+      signal,
+      onProgress && (fraction => stages.videoCrossfade(fraction)),
+    );
 
-    const audioSource = sources.find(source => source.kind === 'mix') || primary;
-    const hasAudio = await probeAudioSource(audioSource.path);
     const args = ['-y', '-i', videoInput.path];
     if (hasAudio) {
       const audioParts = [];
       for (let index = 0; index < edits.length; index += 1) {
         const edit = edits[index];
+        const editDuration = edit.end - edit.start;
         const part = path.join(outputDir, `${clip._id}-${nanoid(6)}-sentence-audio-${index}.m4a`);
         temporaryFiles.push(part);
         await run(ffmpeg(), [
           '-y', '-ss', String(edit.start), '-i', audioSource.path, '-t', String(edit.end - edit.start),
           '-map', '0:a:0', '-vn', '-c:a', 'aac', '-b:a', '160k', '-ar', '48000', '-ac', '2', part,
-        ]);
-        audioParts.push({ path: part, duration: edit.end - edit.start });
+        ], {
+          signal,
+          duration: editDuration,
+          onProgress: onProgress && audioSegmentProgress.reportFor(editDuration),
+        });
+        audioSegmentProgress.complete(editDuration);
+        audioParts.push({ path: part, duration: editDuration });
       }
-      const audioInput = await crossfadeWithFilter(audioParts, outputDir, clip._id, 'sentence-audio', temporaryFiles, 'audio');
+      const audioInput = await crossfadeWithFilter(
+        audioParts,
+        outputDir,
+        clip._id,
+        'sentence-audio',
+        temporaryFiles,
+        'audio',
+        signal,
+        onProgress && (fraction => stages.audioCrossfade(fraction)),
+      );
       args.push('-i', audioInput.path, '-map', '0:v:0', '-map', '1:a:0');
     } else {
       args.push('-map', '0:v:0', '-an');
@@ -296,7 +497,11 @@ async function renderEditedClip({ clip, sources, primary, speakerFiles, outputDi
     args.push(...outputOptions.videoArgs);
     if (hasAudio) args.push(...outputOptions.audioArgs);
     args.push('-shortest', ...outputOptions.muxArgs, output);
-    await run(ffmpeg(), args);
+    await run(ffmpeg(), args, {
+      signal,
+      duration: videoInput.duration,
+      onProgress: onProgress && (fraction => stages.final(fraction)),
+    });
     const cameraSwitches = plan.reduce((count, segment, index) => (
       index > 0 && plan[index - 1].file !== segment.file ? count + 1 : count
     ), 0);
@@ -370,7 +575,7 @@ export function getRenderDimensions(aspectRatio = '9:16') {
  * value matching sourceFiles[].speaker. The editor may provide a manual camera map;
  * otherwise the primary source is used for the whole clip.
  */
-export async function renderClip({ clip, podcast, settings = {}, signal }) {
+export async function renderClip({ clip, podcast, settings = {}, signal, onProgress }) {
   const { width, height } = getRenderDimensions(settings.aspectRatio);
   const outputOptions = getFinalRenderOptions(settings.outputFormat || 'mp4');
   const mediaRoot = path.resolve(process.env.MEDIA_ROOT || './server/storage');
@@ -386,7 +591,19 @@ export async function renderClip({ clip, podcast, settings = {}, signal }) {
   const primary = sources.find(s => s.kind === 'video');
   if (!primary) throw new Error('Rendering requires at least one uploaded video camera source');
   if (clip.sentenceEdits?.length) {
-    return renderEditedClip({ clip, sources, primary, speakerFiles, outputDir, output, width, height, outputFormat: settings.outputFormat || 'mp4' });
+    return renderEditedClip({
+      clip,
+      sources,
+      primary,
+      speakerFiles,
+      outputDir,
+      output,
+      width,
+      height,
+      outputFormat: settings.outputFormat || 'mp4',
+      signal,
+      onProgress,
+    });
   }
   const requested = (clip.cameraSegments || []).filter(s => s.speaker && speakerFiles.has(s.speaker))
     .map(s => ({ start: Math.max(0, Number(s.start) || 0), end: Math.min(duration, Number(s.end) || duration), file: speakerFiles.get(s.speaker) }))
@@ -403,15 +620,28 @@ export async function renderClip({ clip, podcast, settings = {}, signal }) {
   for (const seg of plan) { try { await fs.access(seg.file); } catch { throw new Error(`Media source not found: ${seg.file}`); } }
   // Create synchronized camera segments, normalize them, then concatenate. Each input
   // is independently seeked to the podcast time range so multi-camera files stay aligned.
+  const segmentDurations = plan.map(segment => segment.end - segment.start);
+  const stages = createRenderStages([
+    { id: 'segments', weight: 80, active: segmentDurations.length > 0 },
+    { id: 'concat', weight: 5, active: plan.length > 1 },
+    { id: 'final', weight: 15, active: true },
+  ]);
+  const segmentProgress = createWeightedProgress(segmentDurations, fraction => stages.segments(fraction));
   const parts = [];
   try {
     for (let i = 0; i < plan.length; i++) {
       const seg = plan[i];
+      const segmentDuration = segmentDurations[i];
       const part = path.join(outputDir, `${clip._id}-${nanoid(6)}-${i}.mp4`);
       const args = ['-y', '-ss', String(start + seg.start), '-i', seg.file, '-t', String(seg.end-seg.start),
         '-vf', `scale=${width}:${height}:force_original_aspect_ratio=increase,crop=${width}:${height},setsar=1,fps=30`,
         '-an', ...videoCodecArgs, '-pix_fmt', 'yuv420p', part];
-      await run(process.env.FFMPEG_PATH || 'ffmpeg', args);
+      await run(process.env.FFMPEG_PATH || 'ffmpeg', args, {
+        signal,
+        duration: segmentDuration,
+        onProgress: onProgress && segmentProgress.reportFor(segmentDuration),
+      });
+      segmentProgress.complete(segmentDuration);
       parts.push(part);
     }
     let videoInput = parts[0];
@@ -419,7 +649,11 @@ export async function renderClip({ clip, podcast, settings = {}, signal }) {
       const list = path.join(outputDir, `${clip._id}-${nanoid(5)}.txt`);
       await fs.writeFile(list, parts.map(p => `file '${p.replace(/'/g, "'\\''")}'`).join('\n'));
       const joined = path.join(outputDir, `${clip._id}-${nanoid(5)}-joined.mp4`);
-      await run(process.env.FFMPEG_PATH || 'ffmpeg', ['-y','-f','concat','-safe','0','-i',list,'-c','copy',joined]);
+      await run(process.env.FFMPEG_PATH || 'ffmpeg', ['-y','-f','concat','-safe','0','-i',list,'-c','copy',joined], {
+        signal,
+        duration,
+        onProgress: onProgress && (fraction => stages.concat(fraction)),
+      });
       videoInput = joined;
       await fs.unlink(list).catch(()=>{});
     }
@@ -429,7 +663,11 @@ export async function renderClip({ clip, podcast, settings = {}, signal }) {
     const args = ['-y','-i',videoInput,'-ss',String(start),'-i',audioSource.path,'-t',String(duration),
       '-map','0:v:0','-map','1:a:0?',...finalOptions.videoArgs,
       ...finalOptions.audioArgs,'-shortest',...finalOptions.muxArgs,output];
-    await run(process.env.FFMPEG_PATH || 'ffmpeg', args);
+    await run(process.env.FFMPEG_PATH || 'ffmpeg', args, {
+      signal,
+      duration,
+      onProgress: onProgress && (fraction => stages.final(fraction)),
+    });
     return { output, duration, cameraSwitches: Math.max(0, plan.length - 1) };
   } finally {
     await Promise.all(parts.map(p => fs.unlink(p).catch(()=>{})));

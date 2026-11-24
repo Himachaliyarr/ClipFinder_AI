@@ -338,7 +338,6 @@ export default function DashboardPage({ data, actions }) {
                       ? "Sending your YouTube link…"
                       : "Preparing your upload…"}
                   </span>
-                  <progress aria-label="Preparing podcast" />
                 </div>
               )}
               {uploadProgress && (
@@ -350,7 +349,10 @@ export default function DashboardPage({ data, actions }) {
                   <span>
                     Uploading {uploadProgress.fileName} ·{" "}
                     {Math.floor(uploadProgress.loaded / 1024 ** 2)} /{" "}
-                    {Math.ceil(uploadProgress.total / 1024 ** 2)} MiB
+                    {Math.ceil(uploadProgress.total / 1024 ** 2)} MiB ·{" "}
+                    {uploadProgress.total > 0
+                      ? Math.min(100, Math.floor(uploadProgress.loaded / uploadProgress.total * 100))
+                      : 0}%
                   </span>
                   <progress
                     max={uploadProgress.total}

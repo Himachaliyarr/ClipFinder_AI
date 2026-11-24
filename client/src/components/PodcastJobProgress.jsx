@@ -1,14 +1,9 @@
 import { isPodcastJobQueuedTooLong } from '../utils/podcastJobs.js';
+import { getPodcastProgress } from '../utils/podcastProgress.js';
 
 // Shared status controls keep podcast cards and detail pages in sync.
 export function isPodcastJobActive(status) {
   return ['downloading', 'queued', 'processing'].includes(status);
-}
-
-export function getPodcastProgress(podcast) {
-  const progress = Number(podcast.jobProgress);
-  if (podcast.status === 'clips_ready' || (podcast.status === 'transcribed' && (!Number.isFinite(progress) || progress === 0))) return 100;
-  return Number.isFinite(progress) ? Math.min(100, Math.max(0, progress)) : 0;
 }
 
 export function canRestartPodcastJob(podcast) {
@@ -33,11 +28,15 @@ export default function PodcastJobProgress({ podcast, busy, onStop, onRestart, c
   const active = isPodcastJobActive(podcast.status);
   const progress = getPodcastProgress(podcast);
   const queuedTooLong = isPodcastJobQueuedTooLong(podcast);
+  const hasDeterminateProgress = progress !== null;
 
   return (
     <div className="jobprogress" style={compact ? { minWidth: 0 } : undefined}>
-      <span>{podcast.jobMessage || getJobStatusMessage(podcast.status)} · {progress}%</span>
-      <progress aria-label="Podcast processing progress" max="100" value={progress} />
+      <span>
+        {podcast.jobMessage || getJobStatusMessage(podcast.status)}
+        {hasDeterminateProgress ? ` · ${progress}%` : ''}
+      </span>
+      {hasDeterminateProgress && <progress aria-label="Podcast processing progress" max="100" value={progress} />}
       {queuedTooLong && (
         <p className="muted" role="status">
           Still waiting for the media worker. Check Redis with <code>docker compose up -d redis</code>; <code>npm run dev</code> starts the worker in development.
