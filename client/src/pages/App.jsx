@@ -66,6 +66,60 @@ function downloadBlob(blob, filename) {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
+function speakWelcome(name) {
+  const synthesis = window.speechSynthesis;
+  if (!synthesis || typeof window.SpeechSynthesisUtterance !== "function") return;
+
+  synthesis.cancel();
+  let spoken = false;
+  let fallbackTimer;
+  const speak = () => {
+    if (spoken) return;
+    spoken = true;
+    synthesis.removeEventListener("voiceschanged", speak);
+    window.clearTimeout(fallbackTimer);
+
+    const voices = synthesis.getVoices().filter((voice) => /^en(-|_)/i.test(voice.lang));
+    const indianVoices = voices.filter((voice) => /^en[-_]IN/i.test(voice.lang));
+    const femaleVoicePattern =
+      /\b(aria|ana|jenny|jessa|zira|samantha|karen|moira|tessa|ava|hazel|sara|allison|susan|victoria|heera|neerja|raveena|veena|aditi|priya|sangeeta)\b|google us english|female/i;
+    const voice =
+      indianVoices.find(
+        (candidate) =>
+          femaleVoicePattern.test(candidate.name) &&
+          /natural|online|neural/i.test(candidate.name),
+      ) ||
+      indianVoices.find((candidate) => femaleVoicePattern.test(candidate.name)) ||
+      indianVoices[0] ||
+      voices.find(
+        (candidate) =>
+          femaleVoicePattern.test(candidate.name) && /^en-US/i.test(candidate.lang),
+      ) ||
+      voices.find((candidate) => femaleVoicePattern.test(candidate.name)) ||
+      voices.find((candidate) => /^en-US/i.test(candidate.lang)) ||
+      voices[0];
+    const utterance = new window.SpeechSynthesisUtterance(
+      `You're in, ${name || "creator"}.`,
+    );
+    if (voice) {
+      utterance.voice = voice;
+      utterance.lang = voice.lang;
+    } else {
+      utterance.lang = "en-IN";
+    }
+    utterance.rate = 0.93;
+    utterance.pitch = 1.04;
+    synthesis.speak(utterance);
+  };
+
+  if (synthesis.getVoices().length) {
+    speak();
+  } else {
+    synthesis.addEventListener("voiceschanged", speak);
+    fallbackTimer = window.setTimeout(speak, 800);
+  }
+}
+
 // Attach the saved session token to every API request in one place.
 const api = axios.create({ baseURL: "/api" });
 api.interceptors.request.use((config) => {
@@ -678,6 +732,7 @@ export default function App() {
 
   async function login(e) {
     e.preventDefault();
+    let welcomeName = "";
     try {
       const data = (
         await api.post("/auth/login", {
@@ -688,6 +743,7 @@ export default function App() {
       localStorage.setItem("cf_token", data.token);
       setToken(data.token);
       setCurrentUser(data.user);
+      welcomeName = data.user?.name || "";
       setShowWelcome(true);
       setNotifications([]);
       notificationCursor.current = new Date(Date.now() - 60_000).toISOString();
@@ -702,7 +758,9 @@ export default function App() {
       closeSourcePreview();
     } catch (e) {
       setLoginError(e.response?.data?.error || "Login failed");
+      return;
     }
+    speakWelcome(welcomeName);
   }
 
   async function create() {
