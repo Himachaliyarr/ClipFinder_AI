@@ -271,7 +271,7 @@ export default function App() {
 
   useEffect(() => {
     if (!showWelcome) return undefined;
-    const timer = setTimeout(() => setShowWelcome(false), 1500);
+    const timer = setTimeout(() => setShowWelcome(false), 1900);
     return () => clearTimeout(timer);
   }, [showWelcome]);
 

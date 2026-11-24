@@ -9,7 +9,6 @@ import {
   History,
   Moon,
   RefreshCw,
-  Sparkles,
   Sun,
   Users,
 } from "lucide-react";
@@ -111,17 +110,24 @@ export function LoginScreen({ theme, onToggleTheme, onLogin, error }) {
 
 export function WelcomeScreen({ name }) {
   return (
-    <div className="welcome-screen" role="status" aria-live="polite">
-      <div className="welcome-orb" aria-hidden="true">
-        <Sparkles size={30} />
+    <div className="welcome-screen login-success-screen" role="status" aria-live="polite">
+      <div className="welcome-brand-lockup">
+        <div className="welcome-orb" aria-hidden="true">
+          <Film size={30} />
+        </div>
+        <h2 className="welcome-brand-title">
+          ClipFinder <strong>AI</strong>
+        </h2>
       </div>
-      <p className="welcome-kicker">
-        CLIPFINDER AI <span>•</span> WORKSPACE READY
-      </p>
-      <h2>
-        You're in, <strong>{name || "creator"}.</strong>
-      </h2>
-      <p className="welcome-subtitle">Let’s make something scroll-stopping.</p>
+      <div className="welcome-login-copy">
+        <p className="welcome-kicker">
+          CLIPFINDER AI <span>•</span> WORKSPACE READY
+        </p>
+        <h2>
+          You're in, <strong>{name || "creator"}.</strong>
+        </h2>
+        <p className="welcome-subtitle">Let’s make something scroll-stopping.</p>
+      </div>
     </div>
   );
 }
@@ -138,6 +144,13 @@ export function BrandIntroScreen({ theme }) {
           ClipFinder <strong>AI</strong>
         </h2>
         <p className="welcome-subtitle">Find the moments worth sharing.</p>
+        <div
+          className="welcome-progress"
+          role="progressbar"
+          aria-label="Loading ClipFinder AI"
+        >
+          <span />
+        </div>
       </div>
     </main>
   );
