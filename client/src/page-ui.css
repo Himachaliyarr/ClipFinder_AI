@@ -39,12 +39,7 @@
 }
 
 .upload-panel-heading {
-  margin-bottom: 20px;
-}
-
-.upload-panel-heading .eyebrow {
-  display: inline-block;
-  margin-bottom: 8px;
+  margin-bottom: 12px;
 }
 
 .upload-panel-heading h3 {
@@ -119,11 +114,11 @@
 .upload-dropzone {
   position: relative;
   display: grid;
-  min-height: 150px;
+  min-height: 96px;
   place-content: center;
   justify-items: center;
-  gap: 10px;
-  padding: 22px;
+  gap: 6px;
+  padding: 14px;
   border: 1px dashed #66522d;
   border-radius: 12px;
   color: #b6b8bf;
@@ -1541,10 +1536,19 @@ a:focus-visible {
 
 .rendered-results-heading,
 .generated-render-heading {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  align-items: end;
   gap: 12px;
+}
+
+.rendered-results-heading > div:first-child {
+  grid-column: 1 / -1;
+}
+
+.rendered-results-heading > label,
+.rendered-results-heading > button {
+  min-width: 0;
 }
 
 .generated-render-card .opusclip-actions {
@@ -1571,11 +1575,14 @@ a:focus-visible {
 .rendered-results-heading > label {
   display: grid;
   gap: 6px;
+  min-width: 0;
   color: #b6b7bb;
   font-size: 12px;
 }
 
 .rendered-results-heading select {
+  width: 100%;
+  min-width: 0;
   min-height: 40px;
 }
 

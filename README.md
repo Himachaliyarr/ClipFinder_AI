@@ -28,6 +28,7 @@ Official docs:
 - Live background-job progress/failure status, admin team/role management, audit activity, and a production metrics/learning-loop dashboard.
 - Speaker-keyed multi-camera cut plans, 1080x1920 FFmpeg render pipeline, branded ASS captions, trim validation, re-render versioning and authenticated preview endpoint.
 - Authenticated MP4 download and manually entered per-clip performance and per-podcast AI-cost tracking; approved examples seed later clip-selection prompts.
+- Export rendered clips as MP4 (H.264) or MOV (ProRes 422); export editing timelines as Premiere XML, EDL, or JSON, and transcripts/subtitles as TXT, JSON, DOCX, PDF, SRT, or VTT. The Exports tab can bundle these project/transcript files and already-rendered clips into one ZIP without starting new renders.
 - Automatic speaker-to-camera cut suggestions from synchronized isolated mic tracks using the included RMS timeline utility; editor review is still required.
 - FFmpeg 9:16 rough-cut utility.
 - Docker Compose for MongoDB and Redis.

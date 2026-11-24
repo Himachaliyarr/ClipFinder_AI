@@ -50,14 +50,6 @@ export default function PodcastCard({
           {podcast.title}
         </button>
       </h3>
-      {(podcast.folder || podcast.tags?.length > 0) && (
-        <p className="muted podcast-organization">
-          {podcast.folder && <span>{podcast.folder}</span>}
-          {podcast.tags?.length > 0 && (
-            <span>{podcast.tags.map((tag) => `#${tag}`).join(" ")}</span>
-          )}
-        </p>
-      )}
       <details
         className="podcast-organization-edit"
         key={podcast.updatedAt || podcast._id}

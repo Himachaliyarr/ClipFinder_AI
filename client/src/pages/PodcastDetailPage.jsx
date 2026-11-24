@@ -52,6 +52,8 @@ export default function PodcastDetailPage({ data, actions }) {
     renderClip,
     previewClip,
     downloadClip,
+    exportProject,
+    exportProjectZip,
     deleteRenderedClip,
     saveTranscript,
     exportClipMetadata,
@@ -61,7 +63,6 @@ export default function PodcastDetailPage({ data, actions }) {
   } = actions;
   const [activeTab, setActiveTab] = useState('transcript');
   const [aspectRatio, setAspectRatio] = useState('9:16');
-  const [storyExportFormat, setStoryExportFormat] = useState('pdf');
   const [showReelStoryPicker, setShowReelStoryPicker] = useState(false);
   const [selectedStoryIndexes, setSelectedStoryIndexes] = useState([]);
   const [clipStatusFilter, setClipStatusFilter] = useState('all');
@@ -371,7 +372,6 @@ export default function PodcastDetailPage({ data, actions }) {
             transcriptVisible={transcriptVisible}
             hasTranscript={hasTranscript}
             selectedExportFormat={selectedExportFormat}
-            setExportFormat={setExportFormat}
             exportTranscript={exportTranscript}
             setOpenTranscriptFor={setOpenTranscriptFor}
             saveTranscript={saveTranscript}
@@ -417,18 +417,14 @@ export default function PodcastDetailPage({ data, actions }) {
               </div>
               {selected?.storyMoments?.length > 0 && (
                 <div className="transcript-actions">
-                  <select
-                    className="transcript-export-format"
-                    aria-label="Story export format"
-                    value={storyExportFormat}
-                    onChange={event => setStoryExportFormat(event.target.value)}
+                  <button
+                    type="button"
+                    className="secondary"
+                    onClick={() => exportStoryMetadata(selectedExportFormat)}
+                    disabled={!['pdf', 'docx', 'txt', 'csv'].includes(selectedExportFormat)}
                   >
-                    <option value="pdf">PDF</option>
-                    <option value="docx">Word (.docx)</option>
-                    <option value="txt">Text (.txt)</option>
-                    <option value="csv">CSV (.csv)</option>
-                  </select>
-                  <button type="button" className="secondary" onClick={() => exportStoryMetadata(storyExportFormat)}>Export stories</button>
+                    Export stories
+                  </button>
                 </div>
               )}
             </div>
@@ -520,7 +516,7 @@ export default function PodcastDetailPage({ data, actions }) {
                   <option value="16:9">Landscape (16:9)</option>
                 </select>
               </label>
-              <button type="button" className="secondary" onClick={exportClipMetadata} disabled={!clips.length}>Export CSV</button>
+              <button type="button" className="secondary" onClick={exportClipMetadata} disabled={!clips.length || selectedExportFormat !== 'csv'}>Export CSV</button>
             </div>
           </div>
           {filteredClips.length > 0 && (
@@ -653,7 +649,7 @@ export default function PodcastDetailPage({ data, actions }) {
                     {['approved', 'rendered'].includes(clip.status) && <button className="approve" onClick={() => updateClip(clip._id, { status: 'published' })}>Mark published</button>}
                     {clip.status !== 'published' && <button className="reject" onClick={() => updateClip(clip._id, { status: 'rejected' })}>Reject</button>}
                     <button className="secondary" onClick={() => editCameraPlan(clip)}>Camera plan</button>
-                    <button onClick={() => renderClip(clip._id, aspectRatio)} disabled={busy || ['queued', 'processing'].includes(clip.renderStatus)}>
+                    <button onClick={() => renderClip(clip._id, aspectRatio, selectedExportFormat)} disabled={busy || !['mp4', 'mov'].includes(selectedExportFormat) || ['queued', 'processing'].includes(clip.renderStatus)}>
                       {clip.renderStatus === 'completed' ? `Re-render ${aspectRatio}` : `Render ${aspectRatio}`}
                     </button>
                     {['queued', 'processing'].includes(clip.renderStatus) && <span className="renderprogress">{clip.renderStatus} · {clip.renderProgress || 0}%</span>}
@@ -686,16 +682,56 @@ export default function PodcastDetailPage({ data, actions }) {
             <div className="rendered-results-heading">
               <div>
                 <h3>Rendered clips ({clips.filter(clip => clip.renderStatus && clip.renderStatus !== 'idle').length})</h3>
-                <p className="muted">Preview, download, or re-render locally generated clips.</p>
               </div>
               <label>
-                <span>Output format</span>
+                <span>Aspect ratio</span>
                 <select value={aspectRatio} onChange={event => setAspectRatio(event.target.value)} aria-label="Rendered clip output format">
                   <option value="9:16">Portrait (9:16)</option>
                   <option value="1:1">Square (1:1)</option>
                   <option value="16:9">Landscape (16:9)</option>
                 </select>
               </label>
+              <label>
+                <span>Export format</span>
+                <select
+                  aria-label="Export format"
+                  value={selectedExportFormat}
+                  onChange={event => setExportFormat(event.target.value)}
+                >
+                  <optgroup label="Editing project">
+                    <option value="xml">Premiere XML (.xml)</option>
+                    <option value="edl">Edit Decision List (.edl)</option>
+                    <option value="json">JSON (.json)</option>
+                  </optgroup>
+                  <optgroup label="Rendered video">
+                    <option value="mp4">MP4 (H.264)</option>
+                    <option value="mov">MOV (ProRes 422)</option>
+                  </optgroup>
+                  <optgroup label="Transcript and stories">
+                    <option value="pdf">PDF (.pdf)</option>
+                    <option value="docx">Word (.docx)</option>
+                    <option value="txt">Text (.txt)</option>
+                    <option value="srt">SubRip subtitles (.srt)</option>
+                    <option value="vtt">WebVTT subtitles (.vtt)</option>
+                    <option value="csv">CSV (.csv)</option>
+                  </optgroup>
+                </select>
+              </label>
+              <button
+                type="button"
+                className="secondary"
+                onClick={() => exportProject(selectedExportFormat)}
+                disabled={busy || !clips.length || !['xml', 'edl', 'json'].includes(selectedExportFormat)}
+              >
+                Export project file
+              </button>
+              <button
+                type="button"
+                onClick={exportProjectZip}
+                disabled={busy || !clips.length}
+              >
+                Download all as ZIP
+              </button>
             </div>
             {clips.some(clip => clip.renderStatus && clip.renderStatus !== 'idle') ? (
               <div className="opusclip-grid">
@@ -707,9 +743,11 @@ export default function PodcastDetailPage({ data, actions }) {
                   <article className="opusclip-card generated-render-card" key={clip._id}>
                     <div className="generated-render-heading">
                       <h4>{clip.title}</h4>
-                      <span className={`status ${clip.renderStatus}`}>{clip.renderStatus}</span>
+                      {clip.renderStatus !== 'completed' && (
+                        <span className={`status ${clip.renderStatus}`}>{clip.renderStatus}</span>
+                      )}
                     </div>
-                    <p className="muted">{renderDuration.toFixed(1)}s · {aspectRatio}</p>
+                    <p className="muted">{renderDuration.toFixed(1)}s · {clip.renderSettings?.aspectRatio || aspectRatio} · {(clip.renderSettings?.outputFormat || 'mp4').toUpperCase()}</p>
                     {['queued', 'processing'].includes(clip.renderStatus) && (
                       <div className="rendered-progress">
                         <span>{clip.renderStatus} · {clip.renderProgress || 0}%</span>
@@ -726,8 +764,8 @@ export default function PodcastDetailPage({ data, actions }) {
                       )}
                       <button
                         type="button"
-                        onClick={() => renderClip(clip._id, aspectRatio)}
-                        disabled={busy || ['queued', 'processing'].includes(clip.renderStatus)}
+                        onClick={() => renderClip(clip._id, aspectRatio, selectedExportFormat)}
+                        disabled={busy || !['mp4', 'mov'].includes(selectedExportFormat) || ['queued', 'processing'].includes(clip.renderStatus)}
                       >
                         {clip.renderStatus === 'completed' ? 'Re-render' : 'Render'}
                       </button>

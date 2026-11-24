@@ -14,7 +14,6 @@ export default function TranscriptPanel({
   transcriptVisible,
   hasTranscript,
   selectedExportFormat,
-  setExportFormat,
   exportTranscript,
   setOpenTranscriptFor,
   saveTranscript,
@@ -117,22 +116,7 @@ export default function TranscriptPanel({
       <div className="transcript-heading">
         <h3>Transcript</h3>
         <div className="transcript-actions">
-          <select
-            className="transcript-export-format"
-            aria-label="Transcript export format"
-            value={selectedExportFormat}
-            onChange={event => {
-              const nextFormat = event.target.value;
-              setExportFormat(isSupportedExportFormat(nextFormat) ? nextFormat : 'pdf');
-            }}
-          >
-            {transcriptExportOptions.map(option => (
-              <option key={option} value={option}>
-                {option === 'pdf' ? 'PDF' : option === 'docx' ? 'Word (.docx)' : option === 'json' ? 'JSON (.json)' : option === 'srt' ? 'SubRip (.srt)' : option === 'vtt' ? 'WebVTT (.vtt)' : 'Text (.txt)'}
-              </option>
-            ))}
-          </select>
-          <button className="secondary" onClick={exportTranscript} disabled={!hasTranscript || (['srt', 'vtt'].includes(selectedExportFormat) && !transcriptLines.length)}>
+          <button className="secondary" onClick={exportTranscript} disabled={!hasTranscript || !isSupportedExportFormat(selectedExportFormat) || (['srt', 'vtt'].includes(selectedExportFormat) && !transcriptLines.length)}>
             Export transcript
           </button>
           {['srt', 'vtt'].includes(selectedExportFormat) && !transcriptLines.length && <small className="muted">Subtitle export needs timestamped transcript lines.</small>}

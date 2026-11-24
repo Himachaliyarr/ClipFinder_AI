@@ -3,6 +3,7 @@ import rateLimit from 'express-rate-limit';
 import multer from 'multer';
 import path from 'node:path';
 import fs from 'node:fs';
+import { pathToFileURL } from 'node:url';
 import { nanoid } from 'nanoid';
 import mongoose from 'mongoose';
 import jwt from 'jsonwebtoken';
@@ -63,6 +64,22 @@ setTimeout(() => {
 // Keep storage paths private; API responses expose metadata but not filesystem locations.
 const publicPodcast = doc => { const obj = doc.toObject ? doc.toObject() : doc; if (obj.sourceFiles) obj.sourceFiles = obj.sourceFiles.map(({ path: _path, ...f }) => f); delete obj.audioPath; return obj; };
 const publicClip = doc => { const obj = doc.toObject ? doc.toObject() : doc; delete obj.renderPath; return obj; };
+const escapeXml = value => String(value ?? '').replace(/[<>&"']/g, character => ({
+  '<': '&lt;',
+  '>': '&gt;',
+  '&': '&amp;',
+  '"': '&quot;',
+  "'": '&apos;',
+})[character]);
+const frame = (seconds, fps = 30) => Math.max(0, Math.round(Number(seconds || 0) * fps));
+const smpteTimecode = (seconds, fps = 30) => {
+  const totalFrames = frame(seconds, fps);
+  const hh = Math.floor(totalFrames / (3600 * fps));
+  const mm = Math.floor((totalFrames % (3600 * fps)) / (60 * fps));
+  const ss = Math.floor((totalFrames % (60 * fps)) / fps);
+  const ff = totalFrames % fps;
+  return `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}:${String(ss).padStart(2, '0')}:${String(ff).padStart(2, '0')}`;
+};
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
     const dir = path.join(root, String(req.params.id));
@@ -1121,12 +1138,150 @@ r.delete('/:id', auth, allow('admin','editor'), wrap(async (req, res) => {
   await Podcast.deleteOne({ _id: podcast._id });
   res.json({ message: 'Podcast and associated history deleted', podcastId: podcast.id });
 }));
+r.get('/:id/export-project', auth, wrap(async (req, res) => {
+  if (!validId(req.params.id)) return res.status(400).json({ error: 'Invalid podcast id' });
+  const podcast = await Podcast.findById(req.params.id);
+  if (!podcast) return res.status(404).json({ error: 'Podcast not found' });
+  const clips = await Clip.find({ podcast: podcast._id }).sort({ start: 1, createdAt: 1 });
+  const format = String(req.query.format || 'xml').toLowerCase();
+  if (!['xml', 'edl', 'json'].includes(format)) {
+    return res.status(400).json({ error: 'Project export format must be xml, edl, or json' });
+  }
+
+  const source = (podcast.sourceFiles || []).find(file => file.kind === 'video')
+    || (podcast.sourceFiles || []).find(file => file.kind === 'mix')
+    || (podcast.sourceFiles || []).find(file => file.kind === 'audio')
+    || (podcast.sourceFiles || []).find(file => file.path);
+  if (!clips.length) return res.status(400).json({ error: 'No reel clips are available to export' });
+  if (!source?.path) return res.status(400).json({ error: 'No source media is available for this project export' });
+
+  const resolvedSource = path.resolve(source.path);
+  const rootPrefix = path.resolve(root).endsWith(path.sep) ? path.resolve(root) : `${path.resolve(root)}${path.sep}`;
+  if (!resolvedSource.startsWith(rootPrefix)) return res.status(403).json({ error: 'Invalid source media path' });
+  const filenameBase = String(podcast.title || 'ClipFinder project').replace(/[<>:"/\\|?*\x00-\x1F]/g, '_').trim() || 'ClipFinder project';
+  const fps = 30;
+  const durationSeconds = clips.reduce((total, clip) => total + Math.max(0, Number(clip.end || 0) - Number(clip.start || 0)), 0);
+
+  if (format === 'json') {
+    const manifest = {
+      name: podcast.title,
+      fps,
+      source: {
+        name: source.originalName || path.basename(resolvedSource),
+        path: resolvedSource,
+      },
+      clips: clips.map(clip => ({
+        id: String(clip._id),
+        title: clip.title || clip.hook || `Reel`,
+        startSeconds: Number(clip.start || 0),
+        endSeconds: Number(clip.end || 0),
+        caption: clip.caption || '',
+        cameraSegments: clip.cameraSegments || [],
+        sentenceEdits: clip.sentenceEdits || [],
+        renderSettings: clip.renderSettings || {},
+      })),
+    };
+    res.attachment(`${filenameBase}-premiere-manifest.json`);
+    res.type('application/json').send(JSON.stringify(manifest, null, 2));
+    return;
+  }
+
+  if (format === 'edl') {
+    let timelineStart = 0;
+    const lines = [
+      'TITLE: ' + filenameBase,
+      'FCM: NON-DROP FRAME',
+      '',
+    ];
+    clips.forEach((clip, index) => {
+      const start = Number(clip.start || 0);
+      const end = Number(clip.end || 0);
+      const timelineEnd = timelineStart + Math.max(0, end - start);
+      lines.push(
+        `${String(index + 1).padStart(3, '0')}  AX       V     C        ${smpteTimecode(start, fps)} ${smpteTimecode(end, fps)} ${smpteTimecode(timelineStart, fps)} ${smpteTimecode(timelineEnd, fps)}`,
+        `* FROM CLIP NAME: ${clip.title || clip.hook || `Reel ${index + 1}`}`,
+        `* SOURCE FILE: ${source.originalName || path.basename(resolvedSource)}`,
+      );
+      timelineStart = timelineEnd;
+    });
+    res.attachment(`${filenameBase}.edl`);
+    res.type('text/plain').send(lines.join('\n'));
+    return;
+  }
+
+  const sourceName = source.originalName || path.basename(resolvedSource);
+  const sourceFrames = frame(podcast.duration || durationSeconds, fps);
+  let timelineFrames = 0;
+  const clipItems = clips.map((clip, index) => {
+    const inPoint = frame(clip.start, fps);
+    const outPoint = frame(clip.end, fps);
+    const start = timelineFrames;
+    const duration = Math.max(1, outPoint - inPoint);
+    timelineFrames += duration;
+    return `
+        <clipitem id="clipitem-${index + 1}">
+          <name>${escapeXml(clip.title || clip.hook || `Reel ${index + 1}`)}</name>
+          <duration>${duration}</duration>
+          <rate><timebase>${fps}</timebase><ntsc>FALSE</ntsc></rate>
+          <in>${inPoint}</in>
+          <out>${outPoint}</out>
+          <start>${start}</start>
+          <end>${start + duration}</end>
+          <file id="file-1"/>
+          <link><linkclipref>clipitem-${index + 1}</linkclipref><mediatype>video</mediatype><mediasubtype>2</mediasubtype></link>
+        </clipitem>`;
+  }).join('');
+  const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE xmeml>
+<xmeml version="5">
+  <project>
+    <name>${escapeXml(podcast.title || 'ClipFinder Project')}</name>
+    <children>
+      <sequence id="sequence-1">
+        <name>${escapeXml(podcast.title || 'ClipFinder Sequence')}</name>
+        <duration>${timelineFrames}</duration>
+        <rate><timebase>${fps}</timebase><ntsc>FALSE</ntsc></rate>
+        <media>
+          <video>
+            <format><samplecharacteristics><rate><timebase>${fps}</timebase><ntsc>FALSE</ntsc></rate><width>1080</width><height>1920</height><pixelaspectratio>square</pixelaspectratio></samplecharacteristics></format>
+            <track>${clipItems}
+            </track>
+          </video>
+          <audio>
+            <format><samplecharacteristics><depth>16</depth><samplerate>48000</samplerate></samplecharacteristics></format>
+            <track />
+          </audio>
+        </media>
+      </sequence>
+      <clip id="masterclip-1">
+        <name>${escapeXml(sourceName)}</name>
+        <duration>${sourceFrames}</duration>
+        <rate><timebase>${fps}</timebase><ntsc>FALSE</ntsc></rate>
+        <media>
+          <video><track><clipitem><file id="file-1">
+            <name>${escapeXml(sourceName)}</name>
+            <pathurl>${escapeXml(pathToFileURL(resolvedSource).href)}</pathurl>
+            <rate><timebase>${fps}</timebase><ntsc>FALSE</ntsc></rate>
+            <duration>${sourceFrames}</duration>
+            <media><video><samplecharacteristics><width>1080</width><height>1920</height></samplecharacteristics></video></media>
+          </file></clipitem></track></video>
+        </media>
+      </clip>
+    </children>
+  </project>
+</xmeml>
+`;
+  res.attachment(`${filenameBase}-premiere.xml`);
+  res.type('application/xml').send(xml);
+}));
 r.post('/clips/:clipId/render', auth, allow('admin','editor'), wrap(async (req, res) => {
   if (!validId(req.params.clipId)) return res.status(400).json({ error: 'Invalid clip id' });
   const clip = await Clip.findById(req.params.clipId); if (!clip) return res.status(404).json({ error: 'Clip not found' });
   const podcast = await Podcast.findById(clip.podcast); if (!podcast) return res.status(404).json({ error: 'Podcast not found' });
   const aspectRatio = req.body?.aspectRatio ?? '9:16';
   if (!['9:16', '1:1', '16:9'].includes(aspectRatio)) return res.status(400).json({ error: 'Aspect ratio must be 9:16, 1:1, or 16:9' });
+  const outputFormat = req.body?.outputFormat ?? 'mp4';
+  if (!['mp4', 'mov'].includes(outputFormat)) return res.status(400).json({ error: 'Output format must be mp4 or mov' });
   const settings = {
     brandText: String(req.body?.brandText ?? '').trim().slice(0,80),
     fontName: String(req.body?.fontName || 'Arial').replace(/[^\w -]/g,'').slice(0,40),
@@ -1134,6 +1289,7 @@ r.post('/clips/:clipId/render', auth, allow('admin','editor'), wrap(async (req, 
     accentColour: req.body?.accentColour || '&H00419BC7',
     outlineColour: req.body?.outlineColour || '&H00000000',
     aspectRatio,
+    outputFormat,
   };
   const job = await enqueueRender(clip.id, req.user.id, settings);
   clip.renderJobId = job.id;
@@ -1148,7 +1304,7 @@ r.get('/clips/:clipId/render', auth, wrap(async (req, res) => {
   const clip = await Clip.findById(req.params.clipId); if (!clip?.renderPath) return res.status(404).json({ error: 'No rendered version available' });
   const resolved = path.resolve(clip.renderPath); if (!resolved.startsWith(path.resolve(root) + path.sep)) return res.status(403).json({ error: 'Invalid render path' });
   await Activity.create({ user: req.user.id, action: 'render_accessed', entityType: 'Clip', entityId: clip._id, details: { renderVersion: clip.renderVersion } });
-  res.type('mp4').sendFile(resolved, err => { if (err && !res.headersSent) res.status(404).json({ error: 'Rendered file not found' }); });
+  res.type(path.extname(resolved)).sendFile(resolved, err => { if (err && !res.headersSent) res.status(404).json({ error: 'Rendered file not found' }); });
 }));
 r.delete('/clips/:clipId/render', auth, allow('admin','editor'), wrap(async (req, res) => {
   if (!validId(req.params.clipId)) return res.status(400).json({ error: 'Invalid clip id' });
