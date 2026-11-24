@@ -166,9 +166,10 @@ export function WorkspaceSidebar({
         className={page === "dashboard" && !showRecentPodcasts ? "nav active" : "nav"}
         aria-current={page === "dashboard" && !showRecentPodcasts ? "page" : undefined}
         aria-label="Workspace"
+        title="Workspace"
         onClick={() => onNavigate("dashboard")}
       >
-        <Clapperboard /> Workspace
+        <Clapperboard /> <span className="nav-label">Workspace</span>
       </button>
       <button
         className={showRecentPodcasts && page === "dashboard" ? "nav active" : "nav"}
@@ -177,9 +178,10 @@ export function WorkspaceSidebar({
         aria-expanded={showRecentPodcasts && page === "dashboard"}
         aria-controls="recent-podcasts-section"
         aria-label={showRecentPodcasts ? "Hide recent podcasts" : "Show recent podcasts"}
+        title={showRecentPodcasts ? "Hide recent podcasts" : "Recent podcasts"}
         onClick={onToggleRecentPodcasts}
       >
-        <History /> Recent podcasts
+        <History /> <span className="nav-label">Recent podcasts</span>
       </button>
       {user?.role === "admin" && (
         <>
@@ -187,22 +189,26 @@ export function WorkspaceSidebar({
             className={page === "activity" ? "nav active" : "nav"}
             aria-current={page === "activity" ? "page" : undefined}
             aria-label="Recent activity"
+            title="Recent activity"
             onClick={() => onNavigate("activity")}
           >
-            <Activity /> Recent activity
+            <Activity /> <span className="nav-label">Recent activity</span>
           </button>
           <button
             className={page === "team" ? "nav active" : "nav"}
             aria-current={page === "team" ? "page" : undefined}
             aria-label="Team and audit"
+            title="Team and audit"
             onClick={() => onNavigate("team")}
           >
-            <Users /> Team &amp; audit
+            <Users /> <span className="nav-label">Team &amp; audit</span>
           </button>
         </>
       )}
       <div className="sidefoot">
-        <span className="sidebar-user-name">{user?.email || "Signed in"}</span>
+        <span className="sidebar-user-name" title={user?.email || undefined}>
+          {user?.email || "Signed in"}
+        </span>
         <button className="logout" onClick={onSignOut}>
           Sign out
         </button>

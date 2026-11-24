@@ -1615,6 +1615,9 @@ export default function App() {
       data-theme={theme}
     >
       {showWelcome && <WelcomeScreen name={currentUser?.name} />}
+      <a className="skip-link" href="#workspace-main">
+        Skip to main content
+      </a>
       <WorkspaceSidebar
         page={page}
         user={currentUser}
@@ -1643,7 +1646,7 @@ export default function App() {
           setLoginError("");
         }}
       />
-      <main className="main">
+      <main className="main" id="workspace-main" tabIndex={-1}>
         <WorkspaceHeader
           page={page}
           title={

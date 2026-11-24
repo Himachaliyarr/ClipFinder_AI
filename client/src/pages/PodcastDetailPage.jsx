@@ -516,7 +516,11 @@ export default function PodcastDetailPage({ data, actions }) {
                   <option value="16:9">Landscape (16:9)</option>
                 </select>
               </label>
-              <button type="button" className="secondary" onClick={exportClipMetadata} disabled={!clips.length || selectedExportFormat !== 'csv'}>Export CSV</button>
+              {selectedExportFormat === 'csv' && (
+                <button type="button" className="secondary" onClick={exportClipMetadata} disabled={!clips.length}>
+                  Export CSV
+                </button>
+              )}
             </div>
           </div>
           {filteredClips.length > 0 && (
@@ -600,57 +604,80 @@ export default function PodcastDetailPage({ data, actions }) {
                       )}
                     </div>
                   )}
-                  <ClipSentenceEditor
-                    clip={clip}
-                    transcriptSegments={selected?.segments}
-                    sourceDuration={selected?.duration}
-                    onSave={updateClip}
-                  />
-                  <div className="trimrow">
-                    <label>
-                      In (HH:MM:SS)
-                      <input
-                        type="text"
-                        placeholder="HH:MM:SS"
-                        defaultValue={formatClipTimecode(clip.start)}
-                        aria-invalid={clipSaveStates[clip._id]?.start === 'invalid'}
-                        onBlur={event => saveClipTimecodeEdit(clip, 'start', event.currentTarget)}
-                      />
-                      <small className={`clip-save-state ${clipSaveStates[clip._id]?.start || ''}`} aria-live="polite">
-                        {clipSaveStates[clip._id]?.start === 'invalid' ? 'Use HH:MM:SS, optionally with one decimal place.' : clipSaveStates[clip._id]?.start === 'saving' ? 'Saving…' : clipSaveStates[clip._id]?.start === 'saved' ? 'Saved' : clipSaveStates[clip._id]?.start === 'failed' ? 'Could not save' : ''}
-                      </small>
-                    </label>
-                    <label>
-                      Out (HH:MM:SS)
-                      <input
-                        type="text"
-                        placeholder="HH:MM:SS"
-                        defaultValue={formatClipTimecode(clip.end)}
-                        aria-invalid={clipSaveStates[clip._id]?.end === 'invalid'}
-                        onBlur={event => saveClipTimecodeEdit(clip, 'end', event.currentTarget)}
-                      />
-                      <small className={`clip-save-state ${clipSaveStates[clip._id]?.end || ''}`} aria-live="polite">
-                        {clipSaveStates[clip._id]?.end === 'invalid' ? 'Use HH:MM:SS, optionally with one decimal place.' : clipSaveStates[clip._id]?.end === 'saving' ? 'Saving…' : clipSaveStates[clip._id]?.end === 'saved' ? 'Saved' : clipSaveStates[clip._id]?.end === 'failed' ? 'Could not save' : ''}
-                      </small>
-                    </label>
-                  </div>
                   <button className="secondary clip-transcript-action" type="button" onClick={() => jumpToTranscript(clip)}>View in transcript</button>
-                  <label>Caption</label>
-                  <textarea aria-label={`Caption for ${clip.title}`} defaultValue={clip.caption} onBlur={event => saveInlineClipEdit(clip, 'caption', event.target.value)} />
-                  <small className={`clip-save-state caption-save-state ${clipSaveStates[clip._id]?.caption || ''}`} aria-live="polite">
-                    {clipSaveStates[clip._id]?.caption === 'saving' ? 'Saving caption…' : clipSaveStates[clip._id]?.caption === 'saved' ? 'Caption saved' : clipSaveStates[clip._id]?.caption === 'failed' ? 'Caption could not be saved' : ''}
-                  </small>
-                  <div className="trimrow performance">
-                    <label>Published views<input type="number" min="0" step="1" defaultValue={clip.performance?.views ?? ''} onBlur={event => updateClip(clip._id, { performance: { views: Number(event.target.value || 0) } })} /></label>
-                    <label>Average watch time (sec)<input type="number" min="0" step="0.1" defaultValue={clip.performance?.watchTime ?? ''} onBlur={event => updateClip(clip._id, { performance: { watchTime: Number(event.target.value || 0) } })} /></label>
-                  </div>
+                  <details className="clip-edit-details">
+                    <summary>Edit clip details</summary>
+                    <div className="clip-edit-fields">
+                      <ClipSentenceEditor
+                        clip={clip}
+                        transcriptSegments={selected?.segments}
+                        sourceDuration={selected?.duration}
+                        onSave={updateClip}
+                      />
+                      <div className="trimrow">
+                        <label>
+                          In (HH:MM:SS)
+                          <input
+                            type="text"
+                            placeholder="HH:MM:SS"
+                            defaultValue={formatClipTimecode(clip.start)}
+                            aria-invalid={clipSaveStates[clip._id]?.start === 'invalid'}
+                            onBlur={event => saveClipTimecodeEdit(clip, 'start', event.currentTarget)}
+                          />
+                          <small className={`clip-save-state ${clipSaveStates[clip._id]?.start || ''}`} aria-live="polite">
+                            {clipSaveStates[clip._id]?.start === 'invalid' ? 'Use HH:MM:SS, optionally with one decimal place.' : clipSaveStates[clip._id]?.start === 'saving' ? 'Saving…' : clipSaveStates[clip._id]?.start === 'saved' ? 'Saved' : clipSaveStates[clip._id]?.start === 'failed' ? 'Could not save' : ''}
+                          </small>
+                        </label>
+                        <label>
+                          Out (HH:MM:SS)
+                          <input
+                            type="text"
+                            placeholder="HH:MM:SS"
+                            defaultValue={formatClipTimecode(clip.end)}
+                            aria-invalid={clipSaveStates[clip._id]?.end === 'invalid'}
+                            onBlur={event => saveClipTimecodeEdit(clip, 'end', event.currentTarget)}
+                          />
+                          <small className={`clip-save-state ${clipSaveStates[clip._id]?.end || ''}`} aria-live="polite">
+                            {clipSaveStates[clip._id]?.end === 'invalid' ? 'Use HH:MM:SS, optionally with one decimal place.' : clipSaveStates[clip._id]?.end === 'saving' ? 'Saving…' : clipSaveStates[clip._id]?.end === 'saved' ? 'Saved' : clipSaveStates[clip._id]?.end === 'failed' ? 'Could not save' : ''}
+                          </small>
+                        </label>
+                      </div>
+                      <label className="clip-caption-field">
+                        Caption
+                        <textarea aria-label={`Caption for ${clip.title}`} defaultValue={clip.caption} onBlur={event => saveInlineClipEdit(clip, 'caption', event.target.value)} />
+                        <small className={`clip-save-state caption-save-state ${clipSaveStates[clip._id]?.caption || ''}`} aria-live="polite">
+                          {clipSaveStates[clip._id]?.caption === 'saving' ? 'Saving caption…' : clipSaveStates[clip._id]?.caption === 'saved' ? 'Caption saved' : clipSaveStates[clip._id]?.caption === 'failed' ? 'Caption could not be saved' : ''}
+                        </small>
+                      </label>
+                      <div className="trimrow performance">
+                        <label>Published views<input type="number" min="0" step="1" defaultValue={clip.performance?.views ?? ''} onBlur={event => updateClip(clip._id, { performance: { views: Number(event.target.value || 0) } })} /></label>
+                        <label>Average watch time (sec)<input type="number" min="0" step="0.1" defaultValue={clip.performance?.watchTime ?? ''} onBlur={event => updateClip(clip._id, { performance: { watchTime: Number(event.target.value || 0) } })} /></label>
+                      </div>
+                      <button className="secondary" type="button" onClick={() => editCameraPlan(clip)}>Camera plan</button>
+                      {assignees?.length > 0 && (
+                        <label className="clip-assignee">
+                          Assigned editor
+                          <select value={clip.assignedTo?._id || clip.assignedTo || ''} onChange={event => updateClip(clip._id, { assignedTo: event.target.value || null })}>
+                            <option value="">Unassigned</option>
+                            {assignees.map(user => <option value={user._id || user.id} key={user._id || user.id}>{user.name}</option>)}
+                          </select>
+                        </label>
+                      )}
+                    </div>
+                  </details>
                   <div className="actions">
                     {clip.status === 'suggested' && <button className="approve" onClick={() => updateClip(clip._id, { status: 'approved' })}><CheckCircle size={15} /> Approve</button>}
                     {['approved', 'rendered'].includes(clip.status) && <button className="approve" onClick={() => updateClip(clip._id, { status: 'published' })}>Mark published</button>}
                     {clip.status !== 'published' && <button className="reject" onClick={() => updateClip(clip._id, { status: 'rejected' })}>Reject</button>}
-                    <button className="secondary" onClick={() => editCameraPlan(clip)}>Camera plan</button>
-                    <button onClick={() => renderClip(clip._id, aspectRatio, selectedExportFormat)} disabled={busy || !['mp4', 'mov'].includes(selectedExportFormat) || ['queued', 'processing'].includes(clip.renderStatus)}>
-                      {clip.renderStatus === 'completed' ? `Re-render ${aspectRatio}` : `Render ${aspectRatio}`}
+                    <button
+                      onClick={() => renderClip(clip._id, aspectRatio, selectedExportFormat)}
+                      disabled={busy || !['mp4', 'mov'].includes(selectedExportFormat) || ['queued', 'processing'].includes(clip.renderStatus)}
+                    >
+                      {!['mp4', 'mov'].includes(selectedExportFormat)
+                        ? 'Render (select MP4/MOV)'
+                        : clip.renderStatus === 'completed'
+                          ? `Re-render ${aspectRatio}`
+                          : `Render ${aspectRatio}`}
                     </button>
                     {['queued', 'processing'].includes(clip.renderStatus) && <span className="renderprogress">{clip.renderStatus} · {clip.renderProgress || 0}%</span>}
                     {clip.renderStatus === 'failed' && <span className="error">{clip.renderError || 'Render failed'}</span>}
@@ -661,15 +688,6 @@ export default function PodcastDetailPage({ data, actions }) {
                       </>
                     )}
                   </div>
-                  {assignees?.length > 0 && (
-                    <label className="clip-assignee">
-                      Assigned editor
-                      <select value={clip.assignedTo?._id || clip.assignedTo || ''} onChange={event => updateClip(clip._id, { assignedTo: event.target.value || null })}>
-                        <option value="">Unassigned</option>
-                        {assignees.map(user => <option value={user._id || user.id} key={user._id || user.id}>{user.name}</option>)}
-                      </select>
-                    </label>
-                  )}
                 </div>
                 <span className={`status ${clip.status}`}>{clip.status === 'suggested' ? 'Needs review' : clip.status}</span>
               </article>
@@ -685,7 +703,7 @@ export default function PodcastDetailPage({ data, actions }) {
               </div>
               <label>
                 <span>Aspect ratio</span>
-                <select value={aspectRatio} onChange={event => setAspectRatio(event.target.value)} aria-label="Rendered clip output format">
+                <select value={aspectRatio} onChange={event => setAspectRatio(event.target.value)} aria-label="Rendered clip aspect ratio">
                   <option value="9:16">Portrait (9:16)</option>
                   <option value="1:1">Square (1:1)</option>
                   <option value="16:9">Landscape (16:9)</option>
@@ -717,14 +735,16 @@ export default function PodcastDetailPage({ data, actions }) {
                   </optgroup>
                 </select>
               </label>
-              <button
-                type="button"
-                className="secondary"
-                onClick={() => exportProject(selectedExportFormat)}
-                disabled={busy || !clips.length || !['xml', 'edl', 'json'].includes(selectedExportFormat)}
-              >
-                Export project file
-              </button>
+              {['xml', 'edl', 'json'].includes(selectedExportFormat) && (
+                <button
+                  type="button"
+                  className="secondary"
+                  onClick={() => exportProject(selectedExportFormat)}
+                  disabled={busy || !clips.length}
+                >
+                  Export project file
+                </button>
+              )}
               <button
                 type="button"
                 onClick={exportProjectZip}
@@ -767,7 +787,9 @@ export default function PodcastDetailPage({ data, actions }) {
                         onClick={() => renderClip(clip._id, aspectRatio, selectedExportFormat)}
                         disabled={busy || !['mp4', 'mov'].includes(selectedExportFormat) || ['queued', 'processing'].includes(clip.renderStatus)}
                       >
-                        {clip.renderStatus === 'completed' ? 'Re-render' : 'Render'}
+                        {!['mp4', 'mov'].includes(selectedExportFormat)
+                          ? 'Render (select MP4/MOV)'
+                          : clip.renderStatus === 'completed' ? 'Re-render' : 'Render'}
                       </button>
                       {['completed', 'failed'].includes(clip.renderStatus) && (
                         <button className="reject" type="button" onClick={() => deleteRenderedClip(clip._id)} disabled={busy}>
