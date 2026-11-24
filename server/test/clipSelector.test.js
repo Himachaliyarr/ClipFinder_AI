@@ -16,7 +16,7 @@ test('selects clips using transcript source timestamps and normalizes numeric st
           message: {
             content: JSON.stringify({
               clips: [
-                { start: '2', end: '27', title: 'Good moment' },
+                { start: '2', end: '27', title: 'Good moment', score: 94 },
                 { start: 190, end: 220, title: 'Past the source end' },
               ],
             }),
@@ -35,7 +35,39 @@ test('selects clips using transcript source timestamps and normalizes numeric st
 
     assert.match(request.messages[0].content, /\[0\.0-10\.0s\] First phrase Second phrase/);
     assert.match(request.messages[0].content, /\[10\.0-20\.0s\] Later phrase/);
-    assert.deepEqual(result.clips, [{ start: 2, end: 27, title: 'Good moment' }]);
+    assert.match(request.messages[0].content, /integer score from 1 to 10/);
+    assert.deepEqual(result.clips, [{ start: 2, end: 27, title: 'Good moment', score: 9.4 }]);
+  } finally {
+    globalThis.fetch = previousFetch;
+    if (previousKey === undefined) delete process.env.LLM_API_KEY;
+    else process.env.LLM_API_KEY = previousKey;
+  }
+});
+
+test('normalizes clip ratings to a 1-to-10 scale', async () => {
+  const previousKey = process.env.LLM_API_KEY;
+  const previousFetch = globalThis.fetch;
+  process.env.LLM_API_KEY = 'test-key';
+  globalThis.fetch = async () => ({
+    ok: true,
+    json: async () => ({
+      choices: [{
+        message: {
+          content: JSON.stringify({
+            clips: [
+              { start: 1, end: 20, score: 8 },
+              { start: 21, end: 40, score: 100 },
+              { start: 41, end: 60, score: 0 },
+            ],
+          }),
+        },
+      }],
+    }),
+  });
+
+  try {
+    const { clips } = await selectClips('Transcript text', 60);
+    assert.deepEqual(clips.map(clip => clip.score), [8, 10, 1]);
   } finally {
     globalThis.fetch = previousFetch;
     if (previousKey === undefined) delete process.env.LLM_API_KEY;

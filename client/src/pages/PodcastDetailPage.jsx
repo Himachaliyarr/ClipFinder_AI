@@ -569,7 +569,9 @@ export default function PodcastDetailPage({ data, actions }) {
                       ))}
                     />
                   </label>
-                  <div className="score">{clip.score}/10</div>
+                  <div className="score" aria-label={clip.score == null ? 'Rating unavailable' : `Rating ${clip.score} out of 10`}>
+                    {clip.score == null ? '—' : `${clip.score}/10`}
+                  </div>
                 </div>
                 <div className="clipbody">
                   <div className="clip-title-row">

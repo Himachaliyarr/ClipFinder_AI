@@ -1,5 +1,13 @@
 import { getChatCompletionsUrl } from './openai.js';
 
+export function normalizeClipScore(value) {
+  if (value == null || value === '') return null;
+  const score = Number(value);
+  if (!Number.isFinite(score)) return null;
+  const scoreOutOfTen = score > 10 && score <= 100 ? score / 10 : score;
+  return Math.round(Math.min(10, Math.max(1, scoreOutOfTen)) * 10) / 10;
+}
+
 export function formatTimedTranscript(segments){
   // Keep the source timestamps in compact windows so the model can choose grounded clip ranges.
   const windows=new Map();
@@ -33,7 +41,11 @@ function parseClipResponse(raw,duration){
     if(!clip||typeof clip!=='object'||clip.start===undefined||clip.end===undefined) return [];
     const start=Number(clip.start),end=Number(clip.end);
     if(!Number.isFinite(start)||!Number.isFinite(end)||start<0||end<=start||end>duration) return [];
-    return [{...clip,start,end}];
+    const normalized = {...clip,start,end};
+    if (Object.prototype.hasOwnProperty.call(clip, 'score')) {
+      normalized.score = normalizeClipScore(clip.score);
+    }
+    return [normalized];
   }).slice(0,25);
   if(parsed.clips.length&&!clips.length) throw new Error('Clip selection returned suggestions, but all timestamps were invalid or outside the source duration');
   return clips;
@@ -48,7 +60,7 @@ export async function selectClips(transcript,duration,examples=[],segments=[],si
     : '';
   const timedTranscript=formatTimedTranscript(segments);
   const sourceText=(timedTranscript||transcript).slice(0,100000);
-  const prompt=`You are a short-form podcast editor. Select compelling standalone reel moments from this transcript. Aim for 15-25 clips when the source has enough distinct content; return fewer rather than inventing moments. Return ONLY JSON: {"clips":[{"start":number,"end":number,"hook":string,"title":string,"caption":string,"score":number,"reason":string}]}. Use seconds, keep clips between 20 and 90 seconds when the source duration allows, preserve context, and never exceed ${duration} seconds. The transcript lines include source-time ranges; choose start/end that match those ranges and do not invent timestamps. Prefer strong opinions, stories, surprises, and actionable insights.${examplesText}Transcript with source timings:\n${sourceText}`;
+  const prompt=`You are a short-form podcast editor. Select compelling standalone reel moments from this transcript. Aim for 15-25 clips when the source has enough distinct content; return fewer rather than inventing moments. Return ONLY JSON: {"clips":[{"start":number,"end":number,"hook":string,"title":string,"caption":string,"score":number,"reason":string}]}. Give each clip an integer score from 1 to 10 (never a percentage or a value above 10). Use seconds, keep clips between 20 and 90 seconds when the source duration allows, preserve context, and never exceed ${duration} seconds. The transcript lines include source-time ranges; choose start/end that match those ranges and do not invent timestamps. Prefer strong opinions, stories, surprises, and actionable insights.${examplesText}Transcript with source timings:\n${sourceText}`;
   const model=process.env.LLM_MODEL||'gpt-6-astra';
   const generationOptions=model==='gpt-6-astra'
     ? {reasoning_effort:process.env.LLM_REASONING_EFFORT||'low'}

@@ -13,6 +13,7 @@ import { enqueueYoutubeTranscription, enqueueTranscription, enqueueClipSelection
 import { normalizeYouTubeUrl } from '../services/youtube.js';
 import { applySpeakerCorrections } from '../services/transcript.js';
 import { normalizeSentenceEdits } from '../services/clipSentenceEdits.js';
+import { normalizeClipScore } from '../services/clipSelector.js';
 import { normalizeFolder, normalizeTags } from '../services/projectMetadata.js';
 import { getExpectedChunkLength } from '../services/resumableUpload.js';
 import { MAX_UPLOAD_BYTES, MAX_UPLOAD_FILES, MAX_RESUMABLE_UPLOAD_BYTES, UPLOAD_CHUNK_BYTES } from '../config/limits.js';
@@ -63,7 +64,12 @@ setTimeout(() => {
 }, 30_000).unref();
 // Keep storage paths private; API responses expose metadata but not filesystem locations.
 const publicPodcast = doc => { const obj = doc.toObject ? doc.toObject() : doc; if (obj.sourceFiles) obj.sourceFiles = obj.sourceFiles.map(({ path: _path, ...f }) => f); delete obj.audioPath; return obj; };
-const publicClip = doc => { const obj = doc.toObject ? doc.toObject() : doc; delete obj.renderPath; return obj; };
+const publicClip = doc => {
+  const obj = doc.toObject ? doc.toObject() : doc;
+  if (obj.score != null) obj.score = normalizeClipScore(obj.score);
+  delete obj.renderPath;
+  return obj;
+};
 const escapeXml = value => String(value ?? '').replace(/[<>&"']/g, character => ({
   '<': '&lt;',
   '>': '&gt;',
