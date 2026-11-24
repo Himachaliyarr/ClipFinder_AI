@@ -242,6 +242,17 @@ input[type=file]::file-selector-button{margin-right:10px;padding:8px 11px;border
 .login form{animation:login-card-enter .6s .08s cubic-bezier(.2,.75,.25,1) both}
 @keyframes login-card-enter{from{opacity:0;transform:translateY(16px) scale(.985)}to{opacity:1;transform:translateY(0) scale(1)}}
 @media(max-width:480px){.welcome-orb{width:64px;height:64px;border-radius:21px}.welcome-subtitle{font-size:14px}}
+.login-success-screen{--welcome-dock-x:122px;--welcome-dock-y:45px}
+.welcome-brand-lockup{position:absolute;z-index:1;top:50%;left:50%;display:flex;align-items:center;gap:12px;white-space:nowrap;animation:welcome-brand-dock 1.8s cubic-bezier(.2,.75,.25,1) both}
+.welcome-brand-lockup .welcome-orb{flex:0 0 auto;width:64px;height:64px;margin:0}
+.welcome-brand-title{margin:0!important;font-size:clamp(34px,6vw,54px)!important;white-space:nowrap;animation:none!important}
+.welcome-brand-title strong{display:inline-block}
+.welcome-login-copy{position:absolute;z-index:1;top:calc(50% + 86px);left:50%;width:max-content;max-width:calc(100vw - 32px);text-align:center;animation:welcome-copy-fade 1.8s ease both}
+.welcome-login-copy h2{animation:welcome-copy-in .55s .08s ease both}
+.welcome-login-copy .welcome-subtitle{margin:12px 0 0}
+@keyframes welcome-brand-dock{0%{opacity:0;transform:translate(-50%,-50%) scale(.72)}18%{opacity:1;transform:translate(-50%,-50%) scale(1.05)}34%,52%{transform:translate(-50%,-50%) scale(1)}100%{opacity:1;transform:translate(calc(-50% + var(--welcome-dock-x) - 50vw),calc(-50% + var(--welcome-dock-y) - 50vh)) scale(.53)}}
+@keyframes welcome-copy-fade{0%,18%{opacity:0;transform:translate(-50%,10px)}34%,52%{opacity:1;transform:translate(-50%,0)}100%{opacity:0;transform:translate(-50%,-10px)}}
+@media(max-width:750px){.login-success-screen{--welcome-dock-x:116px;--welcome-dock-y:29px}.welcome-brand-lockup{gap:8px}}
 .nav{position:relative;overflow:hidden}
 .nav::after{content:"";position:absolute;right:8px;width:5px;height:5px;border-radius:50%;background:#eac36e;opacity:0;transform:scale(.3);transition:opacity .18s ease,transform .18s cubic-bezier(.2,.75,.25,1.2)}
 .nav.active::after{opacity:1;transform:scale(1)}
