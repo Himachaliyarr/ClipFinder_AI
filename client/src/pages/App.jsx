@@ -30,6 +30,7 @@ import {
   safeMediaFilename,
   writeBlobToDirectory,
 } from "../utils/localMediaStorage.js";
+import { createExportBundle } from "../utils/exportBundle.js";
 import DashboardPage from "./DashboardPage.jsx";
 import PodcastDetailPage from "./PodcastDetailPage.jsx";
 import TeamPage, { RecentActivityPage } from "./TeamPage.jsx";
@@ -641,9 +642,7 @@ export default function App() {
   const hasStoryMomentJob = ["queued", "processing"].includes(
     selected?.storyMomentsStatus,
   );
-  const selectedExportFormat = isSupportedExportFormat(exportFormat)
-    ? exportFormat
-    : "pdf";
+  const selectedExportFormat = exportFormat;
   useEffect(() => {
     const hasPodcastJob = isPodcastJobActive(selected?.status);
     if (
@@ -1340,10 +1339,10 @@ export default function App() {
     }
   }
 
-  async function renderClip(id, aspectRatio = "9:16") {
+  async function renderClip(id, aspectRatio = "9:16", outputFormat = "mp4") {
     setBusy(true);
     try {
-      await api.post(`/podcasts/clips/${id}/render`, { aspectRatio });
+      await api.post(`/podcasts/clips/${id}/render`, { aspectRatio, outputFormat });
       setError("Render queued. Progress will update here.");
       await refresh();
     } catch (e) {
@@ -1390,6 +1389,83 @@ export default function App() {
     }
   }
 
+  async function exportProject(format = "xml") {
+    if (!selected) return;
+    setBusy(true);
+    try {
+      const response = await api.get(
+        `/podcasts/${selected._id}/export-project`,
+        { params: { format }, responseType: "blob" },
+      );
+      const extension = format === "edl" ? "edl" : format === "json" ? "json" : "xml";
+      downloadBlob(
+        response.data,
+        `${transcriptFilename(selected.title)}-clipfinder.${extension}`,
+      );
+      setError(
+        format === "xml"
+          ? "Premiere XML exported. Import it in Adobe Premiere: File > Import."
+          : "Editing project file exported.",
+      );
+    } catch (e) {
+      setError(e.response?.data?.error || e.message || "Project export unavailable");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function exportProjectZip() {
+    if (!selected) return;
+    setBusy(true);
+    try {
+      setError("Collecting project, transcript, and rendered clip files…");
+      const projectFormats = ["xml", "edl", "json"];
+      const projectResponses = await Promise.all(projectFormats.map(format => (
+        api.get(`/podcasts/${selected._id}/export-project`, {
+          params: { format },
+          responseType: "blob",
+        })
+      )));
+      const projectFiles = Object.fromEntries(projectFormats.map((format, index) => (
+        [format, projectResponses[index].data]
+      )));
+      const renderedFiles = [];
+      const readyClips = clips.filter(clip => clip.renderStatus === "completed");
+      for (const clip of readyClips) {
+        const response = await api.get(`/podcasts/clips/${clip._id}/render`, {
+          responseType: "blob",
+        });
+        const extension = clip.renderSettings?.outputFormat || "mp4";
+        renderedFiles.push({
+          name: `${transcriptFilename(selected.title)}-clip-${clip._id}-v${clip.renderVersion || 1}.${extension}`,
+          blob: response.data,
+        });
+      }
+      const archive = await createExportBundle({
+        title: selected.title,
+        transcript: selected.transcript,
+        segments: selected.segments,
+        projectFiles,
+        renderedFiles,
+      });
+      downloadBlob(archive, `${transcriptFilename(selected.title)}-all-exports.zip`);
+      setError(`ZIP exported with project files, transcript formats, and ${renderedFiles.length} previously rendered clip${renderedFiles.length === 1 ? "" : "s"}.`);
+    } catch (e) {
+      let message = e.response?.data?.error || e.message || "Could not create ZIP export";
+      if (e.response?.data instanceof Blob) {
+        try {
+          const responseBody = JSON.parse(await e.response.data.text());
+          message = responseBody.error || message;
+        } catch {
+          // Keep the original request error when the response is not a JSON error.
+        }
+      }
+      setError(message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function downloadClip(id) {
     setBusy(true);
     try {
@@ -1408,7 +1484,7 @@ export default function App() {
       const response = await api.get(`/podcasts/clips/${id}/render`, { responseType: 'blob' });
       savedFiles.push(await writeBlobToDirectory(
         directoryHandle,
-        safeMediaFilename(`${selected.title} - clip-${id}-v${clip?.renderVersion || 1}.mp4`),
+        safeMediaFilename(`${selected.title} - clip-${id}-v${clip?.renderVersion || 1}.${clip?.renderSettings?.outputFormat || 'mp4'}`),
         response.data,
       ));
       setError(`Saved ${savedFiles.length === 1 ? 'media file' : 'media files'} to "${directoryHandle.name}": ${savedFiles.join(', ')}`);
@@ -1772,6 +1848,8 @@ export default function App() {
               closeSourcePreview,
               previewClip,
               downloadClip,
+              exportProject,
+              exportProjectZip,
               deleteRenderedClip,
             }}
           />

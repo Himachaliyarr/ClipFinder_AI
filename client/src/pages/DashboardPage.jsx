@@ -139,11 +139,7 @@ export default function DashboardPage({ data, actions }) {
           >
             <div className="upload-panel-heading">
               <div>
-                <span className="eyebrow">START A PROJECT</span>
                 <h3 id="new-podcast-heading">New podcast</h3>
-                <p className="muted">
-                  Add a video or paste a YouTube link to get started.
-                </p>
                 {uploadLimits && (
                   <p className="muted upload-limit-note">
                     Up to {uploadLimits.maxFiles} files,{" "}
@@ -165,22 +161,20 @@ export default function DashboardPage({ data, actions }) {
                 <h4 id="project-details-heading">Project details</h4>
                 <div className="upload-group-fields">
                   <label>
-                    <span>Podcast name</span>
                     <input
+                      aria-label="Podcast name"
                       value={title ?? ""}
                       onChange={(event) => setTitle(event.target.value)}
                       placeholder="e.g. Episode 12 — Creator Stories"
                     />
                   </label>
                   <label>
-                    <span>
-                      Tags <small>(optional, comma separated)</small>
-                    </span>
                     <input
+                      aria-label="Tags (optional, comma separated)"
                       maxLength="819"
                       value={projectTags}
                       onChange={(event) => setProjectTags(event.target.value)}
-                      placeholder="e.g. launch, interview, Hindi"
+                      placeholder="Tags (optional) — e.g. launch, Hindi"
                     />
                   </label>
                 </div>
@@ -194,8 +188,8 @@ export default function DashboardPage({ data, actions }) {
                   {!youtubeUrl.trim() && (
                     <>
                       <label>
-                        <span>Source type</span>
                         <select
+                          aria-label="Source type"
                           value={sourceKind}
                           onChange={(event) =>
                             setSourceKind(event.target.value)
@@ -207,19 +201,16 @@ export default function DashboardPage({ data, actions }) {
                         </select>
                       </label>
                       <label>
-                        <span>
-                          Speaker key <small>(optional for master mix)</small>
-                        </span>
                         <input
+                          aria-label="Speaker key (optional for master mix)"
                           value={speakerKey ?? ""}
                           onChange={(event) =>
                             setSpeakerKey(event.target.value)
                           }
-                          placeholder="e.g. host_a"
+                          placeholder="Speaker key (optional) — e.g. host_a"
                         />
                       </label>
                       <label className="upload-dropzone-field">
-                        <span>Video files</span>
                         <div
                           className={`upload-dropzone${isDraggingFiles ? " is-dragging" : ""}`}
                           onDragEnter={(event) => {
@@ -241,7 +232,7 @@ export default function DashboardPage({ data, actions }) {
                         >
                           <FileVideo2 size={28} aria-hidden="true" />
                           <span>
-                            select file to upload here <strong>Upload</strong>
+                            Drop audio/video here or <strong>browse</strong>
                           </span>
                           <input
                             type="file"
@@ -270,14 +261,12 @@ export default function DashboardPage({ data, actions }) {
                     </>
                   )}
                   <label className="upload-url-field">
-                    <span>
-                      YouTube link <small>(optional)</small>
-                    </span>
                     <input
                       type="url"
+                      aria-label="YouTube link (optional)"
                       value={youtubeUrl ?? ""}
                       onChange={(event) => setYoutubeUrl(event.target.value)}
-                      placeholder="https://youtube.com/watch?v=..."
+                      placeholder="YouTube link (optional) — https://youtube.com/watch?v=..."
                     />
                   </label>
                 </div>

@@ -17,6 +17,25 @@ if (!['libx264', 'h264_videotoolbox'].includes(videoEncoder)) throw new Error('F
 const videoCodecArgs = videoEncoder === 'libx264'
   ? ['-c:v', videoEncoder, '-preset', process.env.FFMPEG_PRESET || 'veryfast', '-crf', '20']
   : ['-c:v', videoEncoder, '-b:v', process.env.FFMPEG_VIDEO_BITRATE || '8M'];
+export function getFinalRenderOptions(format = 'mp4') {
+  if (format === 'mp4') {
+    return {
+      extension: 'mp4',
+      videoArgs: [...videoCodecArgs, '-pix_fmt', 'yuv420p'],
+      audioArgs: ['-c:a', 'aac', '-b:a', '160k'],
+      muxArgs: ['-movflags', '+faststart'],
+    };
+  }
+  if (format === 'mov') {
+    return {
+      extension: 'mov',
+      videoArgs: ['-c:v', 'prores_ks', '-profile:v', '3', '-pix_fmt', 'yuv422p10le'],
+      audioArgs: ['-c:a', 'pcm_s16le'],
+      muxArgs: [],
+    };
+  }
+  throw new Error('Output format must be mp4 or mov');
+}
 const SPLICE_TRANSITION_SECONDS = 0.1;
 const youtubeDownloads = new Map();
 const ffmpeg = () => process.env.FFMPEG_PATH || 'ffmpeg';
@@ -214,7 +233,7 @@ async function crossfadeWithFilter(parts, outputDir, clipId, suffix, temporaryFi
   return current[0];
 }
 
-async function renderEditedClip({ clip, sources, primary, speakerFiles, outputDir, output, width, height }) {
+async function renderEditedClip({ clip, sources, primary, speakerFiles, outputDir, output, width, height, outputFormat }) {
   const start = Math.max(0, Number(clip.start) || 0);
   const end = Number(clip.end);
   const edits = normalizeSentenceEdits(clip.sentenceEdits, start, end);
@@ -273,9 +292,10 @@ async function renderEditedClip({ clip, sources, primary, speakerFiles, outputDi
     } else {
       args.push('-map', '0:v:0', '-an');
     }
-    args.push(...videoCodecArgs);
-    if (hasAudio) args.push('-c:a', 'aac', '-b:a', '160k');
-    args.push('-shortest', '-movflags', '+faststart', output);
+    const outputOptions = getFinalRenderOptions(outputFormat);
+    args.push(...outputOptions.videoArgs);
+    if (hasAudio) args.push(...outputOptions.audioArgs);
+    args.push('-shortest', ...outputOptions.muxArgs, output);
     await run(ffmpeg(), args);
     const cameraSwitches = plan.reduce((count, segment, index) => (
       index > 0 && plan[index - 1].file !== segment.file ? count + 1 : count
@@ -352,10 +372,11 @@ export function getRenderDimensions(aspectRatio = '9:16') {
  */
 export async function renderClip({ clip, podcast, settings = {}, signal }) {
   const { width, height } = getRenderDimensions(settings.aspectRatio);
+  const outputOptions = getFinalRenderOptions(settings.outputFormat || 'mp4');
   const mediaRoot = path.resolve(process.env.MEDIA_ROOT || './server/storage');
   const outputDir = path.join(mediaRoot, String(podcast._id), 'renders');
   await fs.mkdir(outputDir, { recursive: true });
-  const output = path.join(outputDir, `${clip._id}-${Date.now()}-${nanoid(5)}.mp4`);
+  const output = path.join(outputDir, `${clip._id}-${Date.now()}-${nanoid(5)}.${outputOptions.extension}`);
   const start = Math.max(0, Number(clip.start) || 0), end = Number(clip.end);
   if (!Number.isFinite(end) || end <= start) throw new Error('Clip end must be greater than start');
   const sources = await resolveRenderSources(podcast, mediaRoot, signal);
@@ -365,7 +386,7 @@ export async function renderClip({ clip, podcast, settings = {}, signal }) {
   const primary = sources.find(s => s.kind === 'video');
   if (!primary) throw new Error('Rendering requires at least one uploaded video camera source');
   if (clip.sentenceEdits?.length) {
-    return renderEditedClip({ clip, sources, primary, speakerFiles, outputDir, output, width, height });
+    return renderEditedClip({ clip, sources, primary, speakerFiles, outputDir, output, width, height, outputFormat: settings.outputFormat || 'mp4' });
   }
   const requested = (clip.cameraSegments || []).filter(s => s.speaker && speakerFiles.has(s.speaker))
     .map(s => ({ start: Math.max(0, Number(s.start) || 0), end: Math.min(duration, Number(s.end) || duration), file: speakerFiles.get(s.speaker) }))
@@ -404,9 +425,10 @@ export async function renderClip({ clip, podcast, settings = {}, signal }) {
     }
     // Prefer an explicitly supplied mixed/master track; isolated speaker mics are not a final mix.
     const audioSource = sources.find(s => s.kind === 'mix') || primary;
+    const finalOptions = getFinalRenderOptions(settings.outputFormat || 'mp4');
     const args = ['-y','-i',videoInput,'-ss',String(start),'-i',audioSource.path,'-t',String(duration),
-      '-map','0:v:0','-map','1:a:0?',...videoCodecArgs,
-      '-c:a','aac','-b:a','160k','-shortest','-movflags','+faststart',output];
+      '-map','0:v:0','-map','1:a:0?',...finalOptions.videoArgs,
+      ...finalOptions.audioArgs,'-shortest',...finalOptions.muxArgs,output];
     await run(process.env.FFMPEG_PATH || 'ffmpeg', args);
     return { output, duration, cameraSwitches: Math.max(0, plan.length - 1) };
   } finally {

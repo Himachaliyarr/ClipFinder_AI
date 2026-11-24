@@ -1,0 +1,22 @@
+{
+  "name": "clipfinder-ai",
+  "version": "1.0.0",
+  "private": true,
+  "workspaces": [
+    "server",
+    "client"
+  ],
+  "scripts": {
+    "dev": "concurrently \"npm:dev:server\" \"npm:dev:client\" \"npm:dev:worker\"",
+    "dev:stack": "docker desktop start && docker compose up -d redis && npm run dev",
+    "dev:server": "npm --workspace server run dev",
+    "dev:client": "npm --workspace client run dev",
+    "dev:worker": "npm --workspace server run worker",
+    "build": "npm --workspace client run build",
+    "start": "npm --workspace server start",
+    "worker": "npm --workspace server run worker"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2"
+  }
+}

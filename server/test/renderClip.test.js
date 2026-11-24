@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { buildSentenceCameraPlan, getRenderDimensions, getSpliceTransitions, resolveRenderSources } from '../src/services/renderClip.js';
+import { buildSentenceCameraPlan, getFinalRenderOptions, getRenderDimensions, getSpliceTransitions, resolveRenderSources } from '../src/services/renderClip.js';
 
 test('maps supported social formats to even render dimensions', () => {
   assert.deepEqual(getRenderDimensions('9:16'), { width: 1080, height: 1920 });
@@ -13,6 +13,15 @@ test('maps supported social formats to even render dimensions', () => {
 
 test('rejects unsupported render formats', () => {
   assert.throws(() => getRenderDimensions('4:3'), /Aspect ratio must be/);
+});
+
+test('selects delivery codecs for MP4 and ProRes MOV renders', () => {
+  assert.equal(getFinalRenderOptions('mp4').extension, 'mp4');
+  assert.deepEqual(getFinalRenderOptions('mp4').audioArgs, ['-c:a', 'aac', '-b:a', '160k']);
+  assert.equal(getFinalRenderOptions('mov').extension, 'mov');
+  assert.deepEqual(getFinalRenderOptions('mov').videoArgs, ['-c:v', 'prores_ks', '-profile:v', '3', '-pix_fmt', 'yuv422p10le']);
+  assert.deepEqual(getFinalRenderOptions('mov').audioArgs, ['-c:a', 'pcm_s16le']);
+  assert.throws(() => getFinalRenderOptions('avi'), /Output format must be mp4 or mov/);
 });
 
 test('crossfades adjacent kept ranges and shortens the transition for very short ranges', () => {
