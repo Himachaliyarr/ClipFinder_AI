@@ -2040,3 +2040,229 @@ a:focus-visible {
     transition-duration: 0.01ms !important;
   }
 }
+
+/* Mobile workspace layout */
+@media (max-width: 750px) {
+  html,
+  body,
+  #root {
+    width: 100%;
+    max-width: 100%;
+    overflow-x: hidden;
+  }
+
+  .app {
+    min-height: 100dvh;
+  }
+
+  .main {
+    width: 100%;
+    max-width: 100%;
+  }
+
+  .main > header {
+    margin-bottom: 20px;
+  }
+
+  .header-actions {
+    width: 100%;
+  }
+
+  .header-actions button,
+  .header-actions .theme-toggle,
+  .header-actions .notification-center {
+    min-height: 44px;
+  }
+
+  .hero {
+    align-items: flex-start;
+  }
+
+  .hero h2 {
+    line-height: 1.2;
+  }
+
+  .create {
+    width: 100%;
+  }
+
+  .create > div {
+    min-width: 0;
+  }
+
+  .podcast-filters,
+  .podcast-search,
+  .status-filter,
+  .clip-library-actions,
+  .activity-heading,
+  .detailbar,
+  .clip-title-row,
+  .clip-card-meta,
+  .story-heading,
+  .transcript-heading,
+  .clip-sentence-heading,
+  .clip-sentence-footer {
+    min-width: 0;
+  }
+
+  .detail-tabs {
+    width: 100%;
+  }
+
+  .clip-bulk-actions,
+  .clip-bulk-buttons,
+  .clip-library-actions,
+  .opusclip-actions,
+  .transcript-actions,
+  .story-card .opusclip-actions {
+    width: 100%;
+  }
+
+  .clip-bulk-buttons button,
+  .clip-library-actions button,
+  .opusclip-actions button,
+  .opusclip-actions a,
+  .transcript-actions button,
+  .actions button,
+  .detailbar > button {
+    min-height: 44px;
+  }
+
+  .clip-sentence-times {
+    width: 100%;
+  }
+
+  .clip-sentence-times label,
+  .clip-sentence-times input {
+    min-width: 0;
+    width: 100%;
+  }
+
+  .trimrow {
+    width: 100%;
+  }
+
+  .trimrow label {
+    flex: 1 1 120px;
+  }
+
+  .trimrow input {
+    width: 100%;
+  }
+
+  .story-card .story-script-line {
+    grid-template-columns: 82px minmax(0, 1fr);
+  }
+
+  .clip-preview-modal {
+    max-height: 92dvh;
+    padding: 14px;
+  }
+
+  .reel-story-picker-actions {
+    flex-wrap: wrap;
+  }
+
+  .reel-story-picker-actions button {
+    flex: 1 1 140px;
+  }
+}
+
+@media (max-width: 480px) {
+  .main {
+    padding: 18px 12px 28px;
+  }
+
+  .main > header {
+    gap: 12px;
+  }
+
+  .main > header h1 {
+    font-size: 23px;
+  }
+
+  .hero {
+    padding: 20px 16px;
+  }
+
+  .hero h2 {
+    font-size: 26px;
+  }
+
+  .hero p {
+    font-size: 14px;
+  }
+
+  .upload-panel-heading .upload-limit-note {
+    line-height: 1.5;
+  }
+
+  .upload-submit-row p,
+  .selected-upload-files li,
+  .source-asset,
+  .activityitem {
+    overflow-wrap: anywhere;
+  }
+
+  .podcast-filters {
+    gap: 8px;
+  }
+
+  .selection-actions {
+    flex-wrap: wrap;
+  }
+
+  .selection-actions button {
+    flex: 1 1 140px;
+  }
+
+  .workflow-step {
+    padding: 8px;
+  }
+
+  .source-asset {
+    font-size: 11px;
+  }
+
+  .clip-edit-fields .trimrow,
+  .story-card-top,
+  .clip-card-meta,
+  .clip-sentence-editor-heading,
+  .clip-sentence-footer,
+  .transcript-heading,
+  .activity-heading {
+    width: 100%;
+  }
+
+  .clip-card-meta {
+    gap: 8px;
+  }
+
+  .clip-sentence-actions {
+    width: 100%;
+  }
+
+  .clip-sentence-actions button {
+    flex: 1 1 0;
+    justify-content: center;
+  }
+
+  .generated-render-card .opusclip-actions,
+  .opusclip-actions {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .detailbar {
+    padding: 14px;
+  }
+
+  .detailbar > div,
+  .detailbar > button {
+    width: 100%;
+  }
+
+  .notification-popover {
+    right: 0;
+    width: calc(100vw - 24px);
+  }
+}

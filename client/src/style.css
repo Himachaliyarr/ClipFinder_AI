@@ -575,8 +575,8 @@ input[type=file]::file-selector-button{margin-right:10px;padding:8px 11px;border
 
 @media (max-width: 480px) {
   .login {
-    gap: 22px;
-    padding: 76px 18px 24px;
+    gap: 16px;
+    padding: 68px 14px 20px;
   }
 
   .login>.theme-toggle {
@@ -586,15 +586,41 @@ input[type=file]::file-selector-button{margin-right:10px;padding:8px 11px;border
   }
 
   .login form {
-    padding: 26px 22px;
+    padding: 22px 18px;
     border-radius: 18px;
   }
 
   .login-intro h1 {
-    font-size: 36px;
+    margin: 10px 0 8px;
+    font-size: clamp(30px, 10vw, 36px);
+  }
+
+  .login-intro .brand {
+    margin-bottom: 10px;
   }
 
   .login-intro-copy {
-    font-size: 14px;
+    font-size: 13px;
+    line-height: 1.55;
+  }
+
+  .login-intro-note {
+    display: none;
+  }
+
+  .login-form-heading {
+    margin-bottom: 18px;
+  }
+
+  .login-field {
+    margin-bottom: 14px;
+  }
+
+  .login-field input {
+    height: 48px;
+  }
+
+  .login-submit {
+    min-height: 48px;
   }
 }
