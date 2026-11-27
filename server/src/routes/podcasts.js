@@ -9,6 +9,7 @@ import mongoose from 'mongoose';
 import jwt from 'jsonwebtoken';
 import { Podcast, Clip, Activity, User, UploadSession } from '../models/index.js';
 import { auth, allow } from '../middleware/auth.js';
+import { asyncHandler as wrap } from '../middleware/asyncHandler.js';
 import { enqueueYoutubeTranscription, enqueueTranscription, enqueueClipSelection, enqueueStorySelection, enqueueOpusClipProject, enqueueRender, mediaQueue, requestMediaJobCancellation } from '../queue.js';
 import { normalizeYouTubeUrl } from '../services/youtube.js';
 import { applySpeakerCorrections } from '../services/transcript.js';
@@ -17,6 +18,8 @@ import { normalizeClipScore } from '../services/clipSelector.js';
 import { normalizeFolder, normalizeTags } from '../services/projectMetadata.js';
 import { getExpectedChunkLength } from '../services/resumableUpload.js';
 import { MAX_UPLOAD_BYTES, MAX_UPLOAD_FILES, MAX_RESUMABLE_UPLOAD_BYTES, UPLOAD_CHUNK_BYTES } from '../config/limits.js';
+import { config } from '../config/settings.js';
+import podcastAnalyticsRoutes from './podcastAnalytics.js';
 
 const r = Router();
 const notificationLimiter = rateLimit({
@@ -35,9 +38,8 @@ const uploadChunkLimiter = rateLimit({
   keyGenerator: req => String(req.user.id),
   message: { error: 'Upload request limit reached. Try again shortly.' },
 });
-const root = path.resolve(process.env.MEDIA_ROOT || './server/storage');
+const root = config.mediaRoot;
 fs.mkdirSync(root, { recursive: true });
-const wrap = fn => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
 const validId = id => mongoose.isValidObjectId(id);
 const escapeRegex = value => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 async function cleanupExpiredUploads() {
@@ -425,7 +427,7 @@ r.post('/:id/select-clips', auth, allow('admin','editor'), wrap(async (req, res)
 }));
 r.post('/:id/select-stories', auth, allow('admin','editor'), wrap(async (req, res) => {
   if (!validId(req.params.id)) return res.status(400).json({ error: 'Invalid podcast id' });
-  if (!process.env.LLM_API_KEY) return res.status(503).json({ error: 'Story selection is temporarily unavailable. Please contact an administrator.' });
+  if (!config.llmApiKey) return res.status(503).json({ error: 'Story selection is temporarily unavailable. Please contact an administrator.' });
   const podcast = await Podcast.findById(req.params.id);
   if (!podcast) return res.status(404).json({ error: 'Podcast not found' });
   if (!podcast.transcript || !podcast.duration) return res.status(400).json({ error: 'Transcribe the podcast before generating story moments' });
@@ -447,7 +449,7 @@ r.post('/:id/select-stories', auth, allow('admin','editor'), wrap(async (req, re
 }));
 r.post('/:id/opusclip', auth, allow('admin','editor'), wrap(async (req, res) => {
   if (!validId(req.params.id)) return res.status(400).json({ error: 'Invalid podcast id' });
-  if (!process.env.OPUSCLIP_API_KEY) return res.status(503).json({ error: 'Reel generation is temporarily unavailable. Please contact an administrator.' });
+  if (!config.opusClipApiKey) return res.status(503).json({ error: 'Reel generation is temporarily unavailable. Please contact an administrator.' });
   const podcast = await Podcast.findById(req.params.id);
   if (!podcast) return res.status(404).json({ error: 'Podcast not found' });
   if (!podcast.sourceUrl && !podcast.sourceFiles?.some(file => file.kind === 'video' && file.path)) {
@@ -659,133 +661,7 @@ r.post('/:id/restart', auth, allow('admin','editor'), wrap(async (req, res) => {
   );
   return res.status(202).json({ message: 'Podcast processing restarted', podcastId: podcast.id });
 }));
-r.get('/analytics/summary', auth, wrap(async (req, res) => {
-  const [podcastCount, clipCount, approvedCount, aggregate] = await Promise.all([
-    Podcast.countDocuments(),
-    Clip.countDocuments({ createdByAI: true }),
-    Clip.countDocuments({ createdByAI: true, status: { $in: ['approved', 'rendered', 'published'] } }),
-    Clip.aggregate([{ $group: { _id: null, totalViews: { $sum: { $ifNull: ['$performance.views', 0] } }, averageWatchTime: { $avg: '$performance.watchTime' } } }])
-  ]);
-  const metrics = aggregate[0] || {};
-  res.json({
-    podcastCount,
-    clipCount,
-    approvedCount,
-    approvalRate: clipCount ? Math.round((approvedCount / clipCount) * 100) : 0,
-    totalViews: metrics.totalViews || 0,
-    averageWatchTime: Math.round(metrics.averageWatchTime || 0)
-  });
-}));
-r.get('/analytics/backup-status', auth, allow('admin'), wrap(async (req, res) => {
-  const statusPath = path.resolve(process.env.BACKUP_ROOT || './backups', 'backup-status.json');
-  let status;
-  try {
-    status = JSON.parse(await fs.promises.readFile(statusPath, 'utf8'));
-  } catch (error) {
-    if (error.code === 'ENOENT') return res.json({ status: 'never_run', lastVerification: null });
-    throw error;
-  }
-  res.json({
-    status: status.status || 'unknown',
-    createdAt: status.createdAt || null,
-    failedAt: status.failedAt || null,
-    backupFolder: status.backupFolder || null,
-    databaseArchiveBytes: status.databaseArchiveBytes || null,
-    mediaIncluded: Boolean(status.mediaIncluded),
-    error: status.error || null,
-    lastVerification: status.lastVerification || null,
-    lastRestoreTest: status.lastRestoreTest || null,
-  });
-}));
-r.post('/analytics/backup-restore-test', auth, allow('admin'), wrap(async (req, res) => {
-  const backupFolder = typeof req.body?.backupFolder === 'string' ? req.body.backupFolder : '';
-  const notes = typeof req.body?.notes === 'string' ? req.body.notes.trim().slice(0, 500) : '';
-  if (req.body?.confirmed !== true || !backupFolder || !notes) {
-    return res.status(400).json({ error: 'Confirm a completed restore drill and provide its backup folder and notes' });
-  }
-  const statusPath = path.resolve(process.env.BACKUP_ROOT || './backups', 'backup-status.json');
-  let status;
-  try {
-    status = JSON.parse(await fs.promises.readFile(statusPath, 'utf8'));
-  } catch (error) {
-    if (error.code === 'ENOENT') return res.status(404).json({ error: 'No backup status has been recorded' });
-    throw error;
-  }
-  if (status.backupFolder !== backupFolder) return res.status(409).json({ error: 'The selected backup is not the latest completed backup' });
-  status.lastRestoreTest = { testedAt: new Date().toISOString(), backupFolder, notes, testedBy: String(req.user.id) };
-  const temporaryPath = `${statusPath}.${process.pid}.tmp`;
-  await fs.promises.writeFile(temporaryPath, JSON.stringify(status, null, 2), 'utf8');
-  await fs.promises.rm(statusPath, { force: true });
-  await fs.promises.rename(temporaryPath, statusPath);
-  try {
-    await Activity.create({
-      user: req.user.id,
-      action: 'backup_restore_test_recorded',
-      entityType: 'Backup',
-      details: { backupFolder, notes },
-    });
-  } catch (error) {
-    console.error(JSON.stringify({ level: 'error', operation: 'record_restore_test_activity', message: error.message }));
-  }
-  res.json({ message: 'Restore drill recorded', lastRestoreTest: status.lastRestoreTest });
-}));
-r.get('/analytics/learning-examples', auth, wrap(async (req, res) => {
-  const examples = await Clip.find({ status: { $in: ['approved', 'rendered', 'published'] }, 'performance.views': { $gt: 0 } })
-    .sort({ 'performance.views': -1, updatedAt: -1 })
-    .limit(20)
-    .select('title hook caption reason score performance status')
-    .lean();
-  res.json(examples);
-}));
-r.get('/analytics/activity', auth, allow('admin'), wrap(async (req, res) => {
-  const events = await Activity.find()
-    .sort({ createdAt: -1 })
-    .limit(100)
-    .populate('user', 'name email')
-    .lean();
-  const idsFor = entityType => [...new Set(events
-    .filter(event => event.entityType === entityType && validId(event.entityId))
-    .map(event => String(event.entityId)))];
-  const [podcasts, clips, users] = await Promise.all([
-    Podcast.find({ _id: { $in: idsFor('Podcast') } }).select('title').lean(),
-    Clip.find({ _id: { $in: idsFor('Clip') } }).select('title podcast').lean(),
-    User.find({ _id: { $in: idsFor('User') } }).select('name').lean(),
-  ]);
-  const clipPodcastIds = [...new Set(clips.map(clip => String(clip.podcast)).filter(validId))];
-  const clipPodcasts = await Podcast.find({ _id: { $in: clipPodcastIds } }).select('title').lean();
-  const podcastTitles = new Map([...podcasts, ...clipPodcasts].map(podcast => [String(podcast._id), podcast.title]));
-  const clipTitles = new Map(clips.map(clip => [String(clip._id), clip]));
-  const userNames = new Map(users.map(user => [String(user._id), user.name]));
-  res.json(events.map(event => {
-    const details = event.details && typeof event.details === 'object' && !Array.isArray(event.details)
-      ? { ...event.details }
-      : event.details;
-    if (details && typeof details === 'object') delete details.renderPath;
-    const entityId = String(event.entityId || '');
-    let location = event.entityType || 'Workspace';
-    if (event.entityType === 'Podcast') {
-      location = `Podcast${podcastTitles.has(entityId) ? ` / ${podcastTitles.get(entityId)}` : ''}`;
-    } else if (event.entityType === 'Clip') {
-      const clip = clipTitles.get(entityId);
-      const podcastTitle = clip ? podcastTitles.get(String(clip.podcast)) : null;
-      location = `${podcastTitle ? `Podcast / ${podcastTitle} / ` : ''}Clip${clip?.title ? ` / ${clip.title}` : ''}`;
-    } else if (event.entityType === 'User') {
-      location = `Team${userNames.has(entityId) ? ` / ${userNames.get(entityId)}` : ''}`;
-    } else if (event.entityType === 'Backup') {
-      location = 'Backup and restore';
-    }
-    const podcastName = event.entityType === 'Podcast'
-      ? podcastTitles.get(entityId)
-      : event.entityType === 'Clip'
-        ? podcastTitles.get(String(clipTitles.get(entityId)?.podcast || ''))
-        : undefined;
-    return { ...event, details, location, podcastName };
-  }));
-}));
-r.delete('/analytics/activity', auth, allow('admin'), wrap(async (req, res) => {
-  const result = await Activity.deleteMany({});
-  res.json({ message: 'Activity history cleared', deletedCount: result.deletedCount });
-}));
+r.use('/analytics', podcastAnalyticsRoutes);
 r.get('/notifications', auth, notificationLimiter, wrap(async (req, res) => {
   const sinceValue = typeof req.query.since === 'string' ? new Date(req.query.since) : null;
   if (!sinceValue || !Number.isFinite(sinceValue.getTime())) {
@@ -852,7 +728,7 @@ r.get('/notifications', auth, notificationLimiter, wrap(async (req, res) => {
     };
   });
   if (req.user.role === 'admin') {
-    const statusPath = path.resolve(process.env.BACKUP_ROOT || './backups', 'backup-status.json');
+    const statusPath = path.join(config.backupRoot, 'backup-status.json');
     try {
       const backupStatus = JSON.parse(await fs.promises.readFile(statusPath, 'utf8'));
       notifications.push(...(backupStatus.history || []).filter(event => new Date(event.createdAt) > sinceValue).map(event => ({
@@ -971,7 +847,7 @@ r.post('/:id/source-preview', auth, wrap(async (req, res) => {
   if (!source) return res.status(404).json({ error: 'No uploaded video source is available to preview' });
   const previewToken = jwt.sign(
     { purpose: 'clip-source-preview', podcastId: podcast.id, userId: req.user.id },
-    process.env.JWT_SECRET,
+    config.jwtSecret,
     { expiresIn: '5m' }
   );
   res.json({ url: `/api/podcasts/${podcast.id}/source?previewToken=${encodeURIComponent(previewToken)}` });
@@ -980,7 +856,7 @@ r.get('/:id/source', wrap(async (req, res) => {
   if (!validId(req.params.id)) return res.status(400).json({ error: 'Invalid podcast id' });
   let claims;
   try {
-    claims = jwt.verify(String(req.query.previewToken || ''), process.env.JWT_SECRET);
+    claims = jwt.verify(String(req.query.previewToken || ''), config.jwtSecret);
   } catch {
     return res.status(401).json({ error: 'Source preview link is invalid or expired' });
   }

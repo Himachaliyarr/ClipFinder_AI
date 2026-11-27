@@ -1,8 +1,9 @@
 import fs from 'node:fs/promises';
 import { createReadStream } from 'node:fs';
+import { config } from '../config/settings.js';
 
 function getApiBase() {
-  const base = (process.env.OPUSCLIP_API_BASE_URL || 'https://api.opus.pro/api').replace(/\/+$/, '');
+  const base = config.opusClipApiBaseUrl.replace(/\/+$/, '');
   let url;
   try {
     url = new URL(base);
@@ -14,7 +15,7 @@ function getApiBase() {
 }
 
 function getApiKey() {
-  const key = process.env.OPUSCLIP_API_KEY;
+  const key = config.opusClipApiKey;
   if (!key) throw new Error('OPUSCLIP_API_KEY is missing');
   return key;
 }
@@ -120,7 +121,7 @@ export async function createOpusClipProject(podcast, openAiMoments, signal) {
   if (!projectId || typeof projectId !== 'string') {
     throw new Error('OpusClip project response did not contain a project ID');
   }
-  const orgId = response.headers.get('x-opus-org-id') || projectData.orgId || projectData.organizationId || process.env.OPUSCLIP_ORG_ID || null;
+  const orgId = response.headers.get('x-opus-org-id') || projectData.orgId || projectData.organizationId || config.opusClipOrgId || null;
   return { projectId, orgId };
 }
 

@@ -1,6 +1,7 @@
 import mongoose from 'mongoose';
+import { config } from './settings.js';
 export async function connectDB(){
-  if(!process.env.MONGODB_URI) throw new Error('MONGODB_URI is missing');
-  await mongoose.connect(process.env.MONGODB_URI);
+  if(!config.mongodbUri) throw new Error('MONGODB_URI is missing');
+  await mongoose.connect(config.mongodbUri);
   console.log('MongoDB connected');
 }

@@ -5,6 +5,8 @@ import jwt from "jsonwebtoken";
 import mongoose from "mongoose";
 import { Activity, Clip, Podcast, UploadSession, User } from "../models/index.js";
 import { allow, auth } from "../middleware/auth.js";
+import { asyncHandler as wrap } from "../middleware/asyncHandler.js";
+import { config } from "../config/settings.js";
 const r = Router();
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
@@ -13,17 +15,15 @@ const authLimiter = rateLimit({
   legacyHeaders: false,
   message: { error: "Too many authentication attempts. Try again later." },
 });
-const wrap = (fn) => (req, res, next) =>
-  Promise.resolve(fn(req, res, next)).catch(next);
 // Keep role and profile data out of tokens; the auth middleware loads the current user.
 const issueToken = (user) =>
-  jwt.sign({ id: user.id }, process.env.JWT_SECRET, { expiresIn: "7d" });
+  jwt.sign({ id: user.id }, config.jwtSecret, { expiresIn: "7d" });
 r.post(
   "/register",
   authLimiter,
   wrap(async (req, res) => {
     // Public registration is closed unless an invite secret has explicitly been configured.
-    if (!process.env.INVITE_CODE)
+    if (!config.inviteCode)
       return res
         .status(403)
         .json({
@@ -43,7 +43,7 @@ r.post(
           error:
             "name, email and a password of at least 12 characters are required",
         });
-    if (inviteCode !== process.env.INVITE_CODE)
+    if (inviteCode !== config.inviteCode)
       return res.status(403).json({ error: "Invalid invite code" });
     const normalizedEmail = email.trim().toLowerCase();
     if (await User.findOne({ email: normalizedEmail }))

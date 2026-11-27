@@ -1,4 +1,3 @@
-import '../config/env.js';
 import path from 'node:path';
 import fs from 'node:fs/promises';
 import { Worker } from 'bullmq';
@@ -12,6 +11,7 @@ import { renderClip } from '../services/renderClip.js';
 import { createOpusClipProject, getOpusClipProjectClips } from '../services/opusClip.js';
 import { getYouTubeAudioUrl } from '../services/youtube.js';
 import { spawn } from 'node:child_process';
+import { config } from '../config/settings.js';
 
 class JobCancelledError extends Error {
   constructor() {
@@ -42,12 +42,12 @@ async function detectSpeakerTimeline(podcast, workDir, signal) {
   const wavs = [];
   for (let i = 0; i < usable.length; i++) {
     const wav = path.join(wavDir, `mic-${i}.wav`);
-    await run(process.env.FFMPEG_PATH || 'ffmpeg', ['-y','-i',usable[i].path,'-vn','-ac','1','-ar','16000','-c:a','pcm_s16le',wav], signal);
+    await run(config.ffmpegPath, ['-y','-i',usable[i].path,'-vn','-ac','1','-ar','16000','-c:a','pcm_s16le',wav], signal);
     wavs.push(wav);
   }
   const output = path.join(wavDir, 'speaker-timeline.json');
   const args = [path.resolve('worker/speaker_detection.py'), '--tracks', ...wavs, '--names', ...usable.map(f => f.speaker), '--window', '1', '--out', output];
-  await run(process.env.PYTHON_PATH || 'python3', args, signal);
+  await run(config.pythonPath, args, signal);
   return JSON.parse(await fs.readFile(output, 'utf8'));
 }
 function cameraSegmentsForClip(timeline, clip) {
@@ -167,7 +167,7 @@ async function processMediaJob(job, signal) {
     if (!podcast.transcript || !podcast.duration) throw new Error('Podcast needs a saved transcript before clip suggestions can be generated');
     const workDir=podcast.sourceFiles?.[0]?.path
       ? path.dirname(podcast.sourceFiles[0].path)
-      : path.resolve(process.env.MEDIA_ROOT || './server/storage',podcast.id);
+      : path.join(config.mediaRoot,podcast.id);
     await Podcast.findByIdAndUpdate(podcast._id,{ $unset:{error:1} });
     await updatePodcastProgress(podcast,job,'processing',10,'Generating AI reel suggestions from saved transcript',signal);
     return generateClipSuggestions({
@@ -220,7 +220,7 @@ async function processMediaJob(job, signal) {
     if (audio.kind !== 'audio') {
       await updatePodcastProgress(podcast, job, 'processing', 10, 'Extracting audio from source media', signal);
       audioPath = path.join(path.dirname(audio.path),'worker-audio.mp3');
-      await run(process.env.FFMPEG_PATH||'ffmpeg',['-y','-i',audio.path,'-vn','-ac','1','-ar','16000','-b:a','64k',audioPath],signal);
+      await run(config.ffmpegPath,['-y','-i',audio.path,'-vn','-ac','1','-ar','16000','-b:a','64k',audioPath],signal);
     }
     await updatePodcastProgress(podcast, job, 'processing', 15, 'Preparing audio chunks for transcription', signal);
     const result = await transcribeLongAudio(
@@ -464,7 +464,7 @@ const worker = new Worker(mediaQueueName, async job => {
     clearInterval(cancellationPoll);
     await connection.del(cancelKey).catch(error => console.error(`Could not clear cancellation for job ${job.id}:`, error));
   }
-},{connection,concurrency:Number(process.env.WORKER_CONCURRENCY||2),lockDuration:1000*60*15});
+},{connection,concurrency:config.workerConcurrency,lockDuration:1000*60*15});
 worker.on('completed',job=>console.log(`Job ${job.id} (${job.name}) completed`));
 worker.on('failed', async (job, err) => {
   console.error(`Job ${job?.id} (${job?.name}) failed:`, err.message);

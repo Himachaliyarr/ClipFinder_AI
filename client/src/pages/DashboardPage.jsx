@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Clapperboard, FileVideo2, Search, Upload, X } from "lucide-react";
 import PodcastCard from "../components/PodcastCard.jsx";
+import { useWorkspace } from "../context/WorkspaceContext.jsx";
 
 function formatFileSize(bytes) {
   if (bytes < 1024 ** 2) return `${Math.max(1, Math.round(bytes / 1024))} KB`;
@@ -8,8 +9,9 @@ function formatFileSize(bytes) {
 }
 
 // Dashboard UI receives data and handlers from App; it does not make API requests.
-export default function DashboardPage({ data, actions }) {
+export default function DashboardPage() {
   const [isDraggingFiles, setIsDraggingFiles] = useState(false);
+  const { data, actions } = useWorkspace();
   const {
     metrics,
     metricsLoading,

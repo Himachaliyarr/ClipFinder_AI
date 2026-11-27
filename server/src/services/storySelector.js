@@ -1,5 +1,6 @@
 import { formatTimedTranscript } from "./clipSelector.js";
 import { getChatCompletionsUrl } from "./openai.js";
+import { config } from "../config/settings.js";
 
 function parseStoryResponse(raw, duration) {
   const cleaned = raw
@@ -84,7 +85,7 @@ export async function selectStories(
   segments = [],
   signal,
 ) {
-  const key = process.env.LLM_API_KEY;
+  const key = config.llmApiKey;
   if (!key)
     throw new Error("LLM_API_KEY is not configured in the server .env file");
   if (!transcript?.trim())
@@ -97,10 +98,10 @@ export async function selectStories(
   const sourceText = (timedTranscript || transcript).slice(0, 100000);
   const prompt = `You are an expert short-form story editor. From this timestamped podcast transcript, select the 25 to 30 strongest distinct, self-contained story moments. Prioritize personal experiences, surprising events, emotional turns, memorable examples, and stories with a clear beginning and payoff. Do not select generic discussion or invent dialogue, facts, or timestamps. Spread the selections across the source and avoid overlapping or repetitive moments. Every start/end must match the transcript's source-time ranges, use seconds, satisfy start < end, and stay within ${duration} seconds. Keep each moment long enough to preserve its context (usually 20 to 120 seconds when available). For each, provide a concise card title, a one- or two-sentence summary, an exact short transcript excerpt, why it is compelling, and an integer score from 1 to 10. Return only JSON in this shape: {"stories":[{"start":number,"end":number,"title":string,"summary":string,"excerpt":string,"reason":string,"score":number}]}. Transcript:\n${sourceText}`;
   const url = getChatCompletionsUrl();
-  const model = process.env.LLM_MODEL || "gpt-6-astra";
+  const model = config.llmModel;
   const generationOptions =
     model === "gpt-6-astra"
-      ? { reasoning_effort: process.env.LLM_REASONING_EFFORT || "low" }
+      ? { reasoning_effort: config.llmReasoningEffort }
       : { temperature: 0.3 };
   let response;
   try {

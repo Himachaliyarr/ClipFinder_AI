@@ -1,4 +1,5 @@
 import { getChatCompletionsUrl } from './openai.js';
+import { config } from '../config/settings.js';
 
 export function normalizeClipScore(value) {
   if (value == null || value === '') return null;
@@ -52,7 +53,7 @@ function parseClipResponse(raw,duration){
 }
 
 export async function selectClips(transcript,duration,examples=[],segments=[],signal){
-  const key=process.env.LLM_API_KEY;
+  const key=config.llmApiKey;
   if(!key) return {clips:[],warning:'LLM_API_KEY is not configured. Add it to enable automatic hook/clip selection.'};
   if(!transcript?.trim()) return {clips:[],warning:'No transcript text is available for clip selection.'};
   const examplesText=examples.length
@@ -61,9 +62,9 @@ export async function selectClips(transcript,duration,examples=[],segments=[],si
   const timedTranscript=formatTimedTranscript(segments);
   const sourceText=(timedTranscript||transcript).slice(0,100000);
   const prompt=`You are a short-form podcast editor. Select compelling standalone reel moments from this transcript. Aim for 15-25 clips when the source has enough distinct content; return fewer rather than inventing moments. Return ONLY JSON: {"clips":[{"start":number,"end":number,"hook":string,"title":string,"caption":string,"score":number,"reason":string}]}. Give each clip an integer score from 1 to 10 (never a percentage or a value above 10). Use seconds, keep clips between 20 and 90 seconds when the source duration allows, preserve context, and never exceed ${duration} seconds. The transcript lines include source-time ranges; choose start/end that match those ranges and do not invent timestamps. Prefer strong opinions, stories, surprises, and actionable insights.${examplesText}Transcript with source timings:\n${sourceText}`;
-  const model=process.env.LLM_MODEL||'gpt-6-astra';
+  const model=config.llmModel;
   const generationOptions=model==='gpt-6-astra'
-    ? {reasoning_effort:process.env.LLM_REASONING_EFFORT||'low'}
+    ? {reasoning_effort:config.llmReasoningEffort}
     : {temperature:0.3};
   let r;
   try {

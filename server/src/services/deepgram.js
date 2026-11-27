@@ -2,11 +2,12 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {execFile, spawn} from 'node:child_process';
 import {promisify} from 'node:util';
+import { config } from '../config/settings.js';
 const execFileAsync=promisify(execFile);
 const DEEPGRAM_URL='https://api.deepgram.com/v1/listen';
 const SARVAM_URL='https://api.sarvam.ai/speech-to-text';
-const ffmpegPath=process.env.FFMPEG_PATH||'ffmpeg';
-const ffprobePath=process.env.FFPROBE_PATH||(path.isAbsolute(ffmpegPath)?path.join(path.dirname(ffmpegPath),process.platform==='win32'?'ffprobe.exe':'ffprobe'):'ffprobe');
+const ffmpegPath=config.ffmpegPath;
+const ffprobePath=config.ffprobePath;
 const SAMPLE_RATE=16000;
 const PCM_BYTES_PER_SECOND=SAMPLE_RATE*2;
 const DEEPGRAM_CHUNK_SECONDS=120;
@@ -36,7 +37,7 @@ export async function splitAudio(inputPath,outDir,signal,chunkSeconds=getChunkSe
   return {files,duration};
 }
 function getTranscriptionProvider(){
-  const provider=(process.env.STT_PROVIDER||'deepgram').toLowerCase();
+  const provider=config.sttProvider;
   if(!['deepgram','sarvam','both'].includes(provider)) throw new Error('STT_PROVIDER must be deepgram, sarvam, or both');
   return provider;
 }
@@ -45,13 +46,13 @@ function getChunkSeconds(provider=getTranscriptionProvider()){
 }
 function requireProviderKeys(){
   const provider=getTranscriptionProvider();
-  if(provider!=='sarvam'&&!process.env.DEEPGRAM_API_KEY) throw new Error('DEEPGRAM_API_KEY is missing');
-  if(provider!=='deepgram'&&!process.env.SARVAM_API_KEY) throw new Error('SARVAM_API_KEY is missing');
+  if(provider!=='sarvam'&&!config.deepgramApiKey) throw new Error('DEEPGRAM_API_KEY is missing');
+  if(provider!=='deepgram'&&!config.sarvamApiKey) throw new Error('SARVAM_API_KEY is missing');
   return provider;
 }
 async function transcribeDeepgramAudio(audio,contentType,signal){
-  const key=process.env.DEEPGRAM_API_KEY;
-  const params=new URLSearchParams({model:process.env.DEEPGRAM_MODEL||'nova-3',language:'multi',smart_format:'true',diarize:'true'});
+  const key=config.deepgramApiKey;
+  const params=new URLSearchParams({model:config.deepgramModel,language:'multi',smart_format:'true',diarize:'true'});
   let response;
   try {
     response=await fetch(`${DEEPGRAM_URL}?${params}`,{
@@ -70,11 +71,11 @@ async function transcribeSarvamAudio(audio,fileName,contentType,signal){
   const form=new FormData();
   form.append('file',new Blob([audio],{type:contentType}),fileName);
   form.append('model','saaras:v4');
-  form.append('mode',process.env.SARVAM_MODE||'codemix');
+  form.append('mode',config.sarvamMode);
   form.append('with_timestamps','true');
   const response=await fetch(SARVAM_URL,{
     method:'POST',
-    headers:{'api-subscription-key':process.env.SARVAM_API_KEY},
+    headers:{'api-subscription-key':config.sarvamApiKey},
     signal,
     body:form
   });

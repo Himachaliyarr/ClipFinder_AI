@@ -2,6 +2,33 @@
 
 Internal podcast-to-reels production workspace based on the supplied **ClipFinder AI Project Blueprint (10 Nov 2026)**. This repository is a runnable MVP foundation with a React dashboard, Express API, MongoDB data models, local/NAS media storage, Sarvam/Deepgram transcription integrations, LLM-based clip suggestions, editor approval workflow, and FFmpeg/Python worker utilities.
 
+## Codebase architecture
+
+```text
+client/src/
+  components/   Reusable UI and workspace chrome
+  context/      Shared page data/actions through React Context
+  pages/        Route-level screens; presentation consumes context, not API calls
+  services/     API client and cross-page service integrations
+  utils/        Reusable formatting, media, transcript, and export helpers
+server/src/
+  config/       Dotenv loading, validated settings, database and upload limits
+  middleware/   Authentication, async route forwarding, and API error responses
+  models/       MongoDB schemas
+  routes/       API composition, podcast analytics, and other domain handlers
+  services/     Transcription, selection, rendering, and provider integrations
+  workers/      Background media-job processing
+  scripts/      Explicit admin and backup operations
+```
+
+`App.jsx` owns workspace state and workflows; page components receive the current page's data and actions through `WorkspaceProvider`/`useWorkspace`. Keep UI rendering in `pages/` and reusable presentation in `components/`; put shared transformations in `utils/` and network access in `services/`. The API client is centralized in `client/src/services/apiClient.js`.
+
+The server loads the root `.env` via `server/src/config/env.js`. Runtime modules read settings from `server/src/config/settings.js`; add new environment values there rather than reading `process.env` from feature code. Keep secrets only in `.env` or the deployment environment, never in source control. Upload-limit settings are validated in `server/src/config/limits.js`.
+
+API endpoints are mounted under `/api` by `server/src/routes/index.js`; domain routers are mounted there without changing their public paths. Add async handlers with `asyncHandler` and let `errorHandler` produce the standard `{ error, requestId }` response for unexpected failures. Route-specific validation should continue returning explicit 4xx responses. Media files are not served from a public static directory.
+
+Podcast analytics and backup/audit endpoints live in `server/src/routes/podcastAnalytics.js` and are mounted under `/api/podcasts/analytics`. The remaining podcast endpoints are still in `podcasts.js`; extract the next cohesive group when its middleware and dependencies can move with it. This incremental approach preserves existing API contracts while the route surface grows.
+
 ## Transcription providers and timing
 
 Sarvam Saaras v4 is the default and returns phrase/chunk timestamps. Deepgram Nova-3 is available as an optional provider (`STT_PROVIDER=deepgram`) and returns word timestamps; it uses multilingual mode for Hindi/English code-switching. Provider accuracy, especially Roman-script Hinglish, still needs comparison on the same authorized sample before choosing a production default. Timing metadata identifies the actual granularity and never invents word timestamps.

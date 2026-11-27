@@ -1,3 +1,5 @@
+import { useWorkspace } from "../context/WorkspaceContext.jsx";
+
 // Team account management is rendered as a dedicated page.
 const activityLabels = {
   podcast_created: "Podcast created",
@@ -190,7 +192,8 @@ export function RecentActivityPage({ activity = [], busy = false, onClearActivit
   );
 }
 
-export default function TeamPage({ data, actions }) {
+export default function TeamPage() {
+  const { data, actions } = useWorkspace();
   const {
     users,
     backupStatus,

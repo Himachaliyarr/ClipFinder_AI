@@ -4,6 +4,7 @@ import { spawn } from 'node:child_process';
 import { nanoid } from 'nanoid';
 import { downloadYouTubeVideo } from './youtube.js';
 import { normalizeSentenceEdits } from './clipSentenceEdits.js';
+import { config } from '../config/settings.js';
 
 export function parseFfmpegProgressLine(line) {
   const separator = line.indexOf('=');
@@ -121,11 +122,11 @@ function createRenderStages(definitions) {
     return [stage.id, fraction => start + (end - start) * fraction];
   }));
 }
-const videoEncoder = process.env.FFMPEG_VIDEO_ENCODER || (process.platform === 'darwin' ? 'h264_videotoolbox' : 'libx264');
+const videoEncoder = config.ffmpegVideoEncoder;
 if (!['libx264', 'h264_videotoolbox'].includes(videoEncoder)) throw new Error('FFMPEG_VIDEO_ENCODER must be libx264 or h264_videotoolbox');
 const videoCodecArgs = videoEncoder === 'libx264'
-  ? ['-c:v', videoEncoder, '-preset', process.env.FFMPEG_PRESET || 'veryfast', '-crf', '20']
-  : ['-c:v', videoEncoder, '-b:v', process.env.FFMPEG_VIDEO_BITRATE || '8M'];
+  ? ['-c:v', videoEncoder, '-preset', config.ffmpegPreset, '-crf', '20']
+  : ['-c:v', videoEncoder, '-b:v', config.ffmpegVideoBitrate];
 export function getFinalRenderOptions(format = 'mp4') {
   if (format === 'mp4') {
     return {
@@ -147,15 +148,8 @@ export function getFinalRenderOptions(format = 'mp4') {
 }
 const SPLICE_TRANSITION_SECONDS = 0.1;
 const youtubeDownloads = new Map();
-const ffmpeg = () => process.env.FFMPEG_PATH || 'ffmpeg';
-const ffprobe = () => {
-  if (process.env.FFPROBE_PATH) return process.env.FFPROBE_PATH;
-  const configuredFfmpeg = process.env.FFMPEG_PATH;
-  if (configuredFfmpeg && /[\\/]/.test(configuredFfmpeg)) {
-    return path.join(path.dirname(configuredFfmpeg), process.platform === 'win32' ? 'ffprobe.exe' : 'ffprobe');
-  }
-  return process.platform === 'win32' ? 'ffprobe.exe' : 'ffprobe';
-};
+const ffmpeg = () => config.ffmpegPath;
+const ffprobe = () => config.renderFfprobePath;
 
 function getCameraPlan(clip, start, end, primaryPath, speakerFiles) {
   const duration = end - start;
@@ -578,7 +572,7 @@ export function getRenderDimensions(aspectRatio = '9:16') {
 export async function renderClip({ clip, podcast, settings = {}, signal, onProgress }) {
   const { width, height } = getRenderDimensions(settings.aspectRatio);
   const outputOptions = getFinalRenderOptions(settings.outputFormat || 'mp4');
-  const mediaRoot = path.resolve(process.env.MEDIA_ROOT || './server/storage');
+  const mediaRoot = config.mediaRoot;
   const outputDir = path.join(mediaRoot, String(podcast._id), 'renders');
   await fs.mkdir(outputDir, { recursive: true });
   const output = path.join(outputDir, `${clip._id}-${Date.now()}-${nanoid(5)}.${outputOptions.extension}`);
@@ -636,7 +630,7 @@ export async function renderClip({ clip, podcast, settings = {}, signal, onProgr
       const args = ['-y', '-ss', String(start + seg.start), '-i', seg.file, '-t', String(seg.end-seg.start),
         '-vf', `scale=${width}:${height}:force_original_aspect_ratio=increase,crop=${width}:${height},setsar=1,fps=30`,
         '-an', ...videoCodecArgs, '-pix_fmt', 'yuv420p', part];
-      await run(process.env.FFMPEG_PATH || 'ffmpeg', args, {
+      await run(config.ffmpegPath, args, {
         signal,
         duration: segmentDuration,
         onProgress: onProgress && segmentProgress.reportFor(segmentDuration),
@@ -649,7 +643,7 @@ export async function renderClip({ clip, podcast, settings = {}, signal, onProgr
       const list = path.join(outputDir, `${clip._id}-${nanoid(5)}.txt`);
       await fs.writeFile(list, parts.map(p => `file '${p.replace(/'/g, "'\\''")}'`).join('\n'));
       const joined = path.join(outputDir, `${clip._id}-${nanoid(5)}-joined.mp4`);
-      await run(process.env.FFMPEG_PATH || 'ffmpeg', ['-y','-f','concat','-safe','0','-i',list,'-c','copy',joined], {
+      await run(config.ffmpegPath, ['-y','-f','concat','-safe','0','-i',list,'-c','copy',joined], {
         signal,
         duration,
         onProgress: onProgress && (fraction => stages.concat(fraction)),
@@ -663,7 +657,7 @@ export async function renderClip({ clip, podcast, settings = {}, signal, onProgr
     const args = ['-y','-i',videoInput,'-ss',String(start),'-i',audioSource.path,'-t',String(duration),
       '-map','0:v:0','-map','1:a:0?',...finalOptions.videoArgs,
       ...finalOptions.audioArgs,'-shortest',...finalOptions.muxArgs,output];
-    await run(process.env.FFMPEG_PATH || 'ffmpeg', args, {
+    await run(config.ffmpegPath, args, {
       signal,
       duration,
       onProgress: onProgress && (fraction => stages.final(fraction)),

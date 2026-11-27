@@ -1,12 +1,12 @@
-import '../config/env.js';
 import bcrypt from 'bcryptjs';
 import mongoose from 'mongoose';
 import { connectDB } from '../config/db.js';
 import { User } from '../models/index.js';
+import { config } from '../config/settings.js';
 
-const name = process.env.ADMIN_NAME?.trim();
-const email = process.env.ADMIN_EMAIL?.trim().toLowerCase();
-const password = process.env.ADMIN_PASSWORD;
+const name = config.adminName?.trim();
+const email = config.adminEmail?.trim().toLowerCase();
+const password = config.adminPassword;
 
 if (!name || !email || !password || password.length < 12) {
   throw new Error('Set ADMIN_NAME, ADMIN_EMAIL, and an ADMIN_PASSWORD of at least 12 characters in the root .env');

@@ -1,5 +1,4 @@
 import React, { useEffect, useRef, useState } from "react";
-import axios from "axios";
 import { Document, HeadingLevel, Packer, Paragraph, TextRun } from "docx";
 import {
   formatClipMetadataCsv,
@@ -22,6 +21,8 @@ import {
 } from "../components/AppChrome.jsx";
 import { isPodcastJobActive } from "../components/PodcastJobProgress.jsx";
 import { isSupportedExportFormat } from "../components/TranscriptPanel.jsx";
+import { WorkspaceProvider } from "../context/WorkspaceContext.jsx";
+import api from "../services/apiClient.js";
 import {
   chooseLocalMediaDirectory,
   copyAuthenticatedFileToDirectory,
@@ -31,40 +32,10 @@ import {
   writeBlobToDirectory,
 } from "../utils/localMediaStorage.js";
 import { createExportBundle } from "../utils/exportBundle.js";
+import { downloadBlob, escapeHtml, transcriptFilename } from "../utils/downloads.js";
 import DashboardPage from "./DashboardPage.jsx";
 import PodcastDetailPage from "./PodcastDetailPage.jsx";
 import TeamPage, { RecentActivityPage } from "./TeamPage.jsx";
-
-function escapeHtml(value) {
-  return String(value || "").replace(
-    /[&<>"']/g,
-    (character) =>
-      ({
-        "&": "&amp;",
-        "<": "&lt;",
-        ">": "&gt;",
-        '"': "&quot;",
-        "'": "&#39;",
-      })[character],
-  );
-}
-
-function transcriptFilename(title) {
-  return (
-    String(title || "transcript")
-      .replace(/[<>:"/\\|?*\x00-\x1F]/g, "_")
-      .trim() || "transcript"
-  );
-}
-
-function downloadBlob(blob, filename) {
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = filename;
-  link.click();
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
-}
 
 function speakWelcome(name) {
   const synthesis = window.speechSynthesis;
@@ -119,14 +90,6 @@ function speakWelcome(name) {
     fallbackTimer = window.setTimeout(speak, 800);
   }
 }
-
-// Attach the saved session token to every API request in one place.
-const api = axios.create({ baseURL: "/api" });
-api.interceptors.request.use((config) => {
-  const token = localStorage.getItem("cf_token");
-  if (token) config.headers.Authorization = `Bearer ${token}`;
-  return config;
-});
 
 export default function App() {
   const [token, setToken] = useState(localStorage.getItem("cf_token"));
@@ -1760,85 +1723,93 @@ export default function App() {
             onClearActivity={clearActivity}
           />
         ) : page === "team" && currentUser?.role === "admin" ? (
-          <TeamPage
-            data={{
-              users,
-              activity,
-              backupStatus,
-              newUser,
-              editingUser,
-              busy,
-              currentUser,
+          <WorkspaceProvider
+            value={{
+              data: {
+                users,
+                activity,
+                backupStatus,
+                newUser,
+                editingUser,
+                busy,
+                currentUser,
+              },
+              actions: {
+                setNewUser,
+                createUser,
+                setEditingUser,
+                updateUser,
+                deleteUser,
+                startEditingUser,
+                recordRestoreTest,
+                clearActivity,
+              },
             }}
-            actions={{
-              setNewUser,
-              createUser,
-              setEditingUser,
-              updateUser,
-              deleteUser,
-              startEditingUser,
-              recordRestoreTest,
-              clearActivity,
-            }}
-          />
+          >
+            <TeamPage />
+          </WorkspaceProvider>
         ) : page === "dashboard" ? (
-          <DashboardPage
-            data={{
-              metrics,
-              metricsLoading,
-              title,
-              youtubeUrl,
-              sourceKind,
-              speakerKey,
-              files,
-              localMediaDirectoryName,
-              localMediaCopyStatus,
-              uploadLimits,
-              uploadProgress,
-              busy,
-              podcasts,
-              filteredPodcasts,
-              podcastSearch,
-              podcastStatusFilter,
-              podcastDateFrom,
-              podcastDateTo,
-              projectFolder,
-              projectTags,
-              folderFilter,
-              folderOptions,
-              allPodcastsSelected,
-              selectedPodcastIds,
-              canDeletePodcasts,
-              showRecentPodcasts,
-              podcastsLoaded,
-              podcastsLoadFailed: Boolean(podcastsLoadError),
-              podcastsLoadError,
+          <WorkspaceProvider
+            value={{
+              data: {
+                metrics,
+                metricsLoading,
+                title,
+                youtubeUrl,
+                sourceKind,
+                speakerKey,
+                files,
+                localMediaDirectoryName,
+                localMediaCopyStatus,
+                uploadLimits,
+                uploadProgress,
+                busy,
+                podcasts,
+                filteredPodcasts,
+                podcastSearch,
+                podcastStatusFilter,
+                podcastDateFrom,
+                podcastDateTo,
+                projectFolder,
+                projectTags,
+                folderFilter,
+                folderOptions,
+                allPodcastsSelected,
+                selectedPodcastIds,
+                canDeletePodcasts,
+                showRecentPodcasts,
+                podcastsLoaded,
+                podcastsLoadFailed: Boolean(podcastsLoadError),
+                podcastsLoadError,
+              },
+              actions: {
+                setPodcastSearch,
+                setPodcastStatusFilter,
+                setPodcastDateFrom,
+                setPodcastDateTo,
+                setProjectFolder,
+                setProjectTags,
+                setFolderFilter,
+                refreshDashboard,
+                setTitle,
+                setYoutubeUrl,
+                setSourceKind,
+                setSpeakerKey,
+                setFiles,
+                chooseLocalMediaFolder,
+                create,
+                toggleSelectAllPodcasts,
+                deleteSelectedPodcasts,
+                open,
+                updatePodcastMetadata,
+                togglePodcastSelection,
+                stopPodcastJob,
+                restartPodcastJob,
+              },
             }}
-            actions={{
-              setPodcastSearch,
-              setPodcastStatusFilter,
-              setPodcastDateFrom,
-              setPodcastDateTo,
-              setProjectFolder,
-              setProjectTags,
-              setFolderFilter,
-              refreshDashboard,
-              setTitle,
-              setYoutubeUrl,
-              setSourceKind,
-              setSpeakerKey,
-              setFiles,
-              chooseLocalMediaFolder,
-              create,
-              toggleSelectAllPodcasts,
-              deleteSelectedPodcasts,
-              open,
-              updatePodcastMetadata,
-              togglePodcastSelection,
-              stopPodcastJob,
-              restartPodcastJob,
-            }}
-          />
+          >
+            <DashboardPage />
+          </WorkspaceProvider>
         ) : page === "detail" && !selected ? (
           <section
             className="empty-state workspace-restore-state"
@@ -1869,59 +1840,62 @@ export default function App() {
             )}
           </section>
         ) : page === "detail" ? (
-          <PodcastDetailPage
-            key={selected?._id || "podcast-detail"}
-            data={{
-              selected,
-              clips,
-              busy,
-              sourceKind,
-              speakerKey,
-              extraFiles,
-              localMediaDirectoryName,
-              localMediaCopyStatus,
-              transcriptLines,
-              transcriptVisible,
-              hasTranscript,
-              selectedExportFormat,
-              hasStoryMomentJob,
-              hasOpusClipJob,
-              assignees,
-              savingTranscript,
-              previewSource,
-              uploadProgress,
+          <WorkspaceProvider
+            value={{
+              data: {
+                selected,
+                clips,
+                busy,
+                sourceKind,
+                speakerKey,
+                extraFiles,
+                localMediaDirectoryName,
+                localMediaCopyStatus,
+                transcriptLines,
+                transcriptVisible,
+                hasTranscript,
+                selectedExportFormat,
+                hasStoryMomentJob,
+                hasOpusClipJob,
+                assignees,
+                savingTranscript,
+                previewSource,
+                uploadProgress,
+              },
+              actions: {
+                setSourceKind,
+                setSpeakerKey,
+                setExtraFiles,
+                chooseLocalMediaFolder,
+                stopPodcastJob,
+                stopGeneration,
+                restartPodcastJob,
+                transcribe,
+                generateStories,
+                generateClipSuggestions,
+                generateOpusClips,
+                uploadMore,
+                setExportFormat,
+                exportTranscript,
+                saveTranscript,
+                exportClipMetadata,
+                exportStoryMetadata,
+                setOpenTranscriptFor,
+                updateClip,
+                editCameraPlan,
+                renderClip,
+                previewSourceClip,
+                closeSourcePreview,
+                previewClip,
+                downloadClip,
+                exportProject,
+                exportProjectZip,
+                deleteRenderedClip,
+              },
             }}
-            actions={{
-              setSourceKind,
-              setSpeakerKey,
-              setExtraFiles,
-              chooseLocalMediaFolder,
-              stopPodcastJob,
-              stopGeneration,
-              restartPodcastJob,
-              transcribe,
-              generateStories,
-              generateClipSuggestions,
-              generateOpusClips,
-              uploadMore,
-              setExportFormat,
-              exportTranscript,
-              saveTranscript,
-              exportClipMetadata,
-              exportStoryMetadata,
-              setOpenTranscriptFor,
-              updateClip,
-              editCameraPlan,
-              renderClip,
-              previewSourceClip,
-              closeSourcePreview,
-              previewClip,
-              downloadClip,
-              exportProject,
-              exportProjectZip,
-              deleteRenderedClip,
-            }}
-          />
+          >
+            <PodcastDetailPage key={selected?._id || "podcast-detail"} />
+          </WorkspaceProvider>
         ) : null}
       </main>
     </div>

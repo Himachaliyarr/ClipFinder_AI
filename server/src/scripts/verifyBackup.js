@@ -1,12 +1,12 @@
-import '../../config/env.js';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { createReadStream } from 'node:fs';
 import { createGunzip } from 'node:zlib';
 import { Writable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
+import { config } from '../config/settings.js';
 
-const backupRoot = path.resolve(process.env.BACKUP_ROOT || './backups');
+const backupRoot = config.backupRoot;
 const discard = new Writable({ write(chunk, encoding, callback) { callback(); } });
 
 async function updateStatus(update) {

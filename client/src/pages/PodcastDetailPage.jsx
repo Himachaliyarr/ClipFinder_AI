@@ -8,9 +8,11 @@ import PodcastJobProgress, {
 import TranscriptPanel from '../components/TranscriptPanel.jsx';
 import ClipSentenceEditor from '../components/ClipSentenceEditor.jsx';
 import { isPodcastJobQueuedTooLong } from '../utils/podcastJobs.js';
+import { useWorkspace } from '../context/WorkspaceContext.jsx';
 
 // Podcast processing, transcript, story, and clip controls belong to the detail page.
-export default function PodcastDetailPage({ data, actions }) {
+export default function PodcastDetailPage() {
+  const { data, actions } = useWorkspace();
   const {
     selected,
     clips,

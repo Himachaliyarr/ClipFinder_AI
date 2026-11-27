@@ -1,11 +1,12 @@
 import { Queue } from 'bullmq';
 import IORedis from 'ioredis';
+import { config } from './config/settings.js';
 
-export const connection = new IORedis(process.env.REDIS_URL || 'redis://127.0.0.1:6379', {
+export const connection = new IORedis(config.redisUrl, {
   maxRetriesPerRequest: null,
   enableReadyCheck: true
 });
-export const mediaQueueName = process.env.MEDIA_QUEUE_NAME || `clipfinder-media-${process.platform}`;
+export const mediaQueueName = config.mediaQueueName;
 export const mediaQueue = new Queue(mediaQueueName, { connection, defaultJobOptions: { removeOnComplete: 200, removeOnFail: 500 } });
 export const mediaJobCancellationKey = jobId => `${mediaQueueName}:cancel:${jobId}`;
 export async function requestMediaJobCancellation(job) {
