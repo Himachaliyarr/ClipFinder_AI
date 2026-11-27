@@ -3,7 +3,6 @@ import rateLimit from 'express-rate-limit';
 import multer from 'multer';
 import path from 'node:path';
 import fs from 'node:fs';
-import { pathToFileURL } from 'node:url';
 import { nanoid } from 'nanoid';
 import mongoose from 'mongoose';
 import jwt from 'jsonwebtoken';
@@ -16,6 +15,7 @@ import { applySpeakerCorrections } from '../services/transcript.js';
 import { normalizeSentenceEdits } from '../services/clipSentenceEdits.js';
 import { normalizeClipScore } from '../services/clipSelector.js';
 import { normalizeFolder, normalizeTags } from '../services/projectMetadata.js';
+import { createPortableSourceReference } from '../services/projectExport.js';
 import { getExpectedChunkLength } from '../services/resumableUpload.js';
 import { MAX_UPLOAD_BYTES, MAX_UPLOAD_FILES, MAX_RESUMABLE_UPLOAD_BYTES, UPLOAD_CHUNK_BYTES } from '../config/limits.js';
 import { config } from '../config/settings.js';
@@ -65,7 +65,7 @@ setTimeout(() => {
   })));
 }, 30_000).unref();
 // Keep storage paths private; API responses expose metadata but not filesystem locations.
-const publicPodcast = doc => { const obj = doc.toObject ? doc.toObject() : doc; if (obj.sourceFiles) obj.sourceFiles = obj.sourceFiles.map(({ path: _path, ...f }) => f); delete obj.audioPath; return obj; };
+const publicPodcast = doc => { const obj = doc.toObject ? doc.toObject() : doc; if (obj.sourceFiles) obj.sourceFiles = obj.sourceFiles.map(({ path: _path, ...f }) => f); delete obj.audioPath; delete obj.storyMomentsJobId; delete obj.opusClipJobId; return obj; };
 const publicClip = doc => {
   const obj = doc.toObject ? doc.toObject() : doc;
   if (obj.score != null) obj.score = normalizeClipScore(obj.score);
@@ -307,7 +307,37 @@ r.get('/', auth, wrap(async (req, res) => {
     const query = new RegExp(escapeRegex(req.query.q.trim().slice(0, 100)), 'i');
     filter.$or = [{ title: query }, { tags: query }];
   }
-  res.json((await Podcast.find(filter).sort({ createdAt: -1 }).select('-transcript -deepgramTranscript -sarvamTranscript -sarvamSegments -segments -opusClipClips -storyMoments')).map(publicPodcast));
+  const paginated = req.query.limit !== undefined || req.query.cursor !== undefined;
+  if (!paginated) {
+    res.json((await Podcast.find(filter).sort({ createdAt: -1 }).select('-transcript -deepgramTranscript -sarvamTranscript -sarvamSegments -segments -opusClipClips -storyMoments')).map(publicPodcast));
+    return;
+  }
+  const limitValue = req.query.limit === undefined ? 100 : Number(req.query.limit);
+  if (!Number.isSafeInteger(limitValue) || limitValue < 1) return res.status(400).json({ error: 'Page limit must be a positive integer' });
+  const limit = Math.min(limitValue, 100);
+  const conditions = [filter];
+  if (req.query.cursor !== undefined) {
+    if (typeof req.query.cursor !== 'string' || !validId(req.query.cursor)) return res.status(400).json({ error: 'Invalid podcast page cursor' });
+    const cursorPodcast = await Podcast.findById(req.query.cursor).select('_id createdAt').lean();
+    if (!cursorPodcast) return res.status(400).json({ error: 'Podcast page cursor is no longer available' });
+    conditions.push({
+      $or: [
+        { createdAt: { $lt: cursorPodcast.createdAt } },
+        { createdAt: cursorPodcast.createdAt, _id: { $lt: cursorPodcast._id } },
+      ],
+    });
+  }
+  const query = conditions.length > 1 ? { $and: conditions } : filter;
+  const podcasts = await Podcast.find(query)
+    .sort({ createdAt: -1, _id: -1 })
+    .limit(limit + 1)
+    .select('-transcript -deepgramTranscript -sarvamTranscript -sarvamSegments -segments -opusClipClips -storyMoments');
+  const hasMore = podcasts.length > limit;
+  const items = podcasts.slice(0, limit);
+  res.json({
+    items: items.map(publicPodcast),
+    nextCursor: hasMore ? String(items.at(-1)._id) : null,
+  });
 }));
 r.post('/', auth, allow('admin','editor'), wrap(async (req, res) => {
   const title = String(req.body?.title || '').trim().slice(0, 180);
@@ -435,14 +465,20 @@ r.post('/:id/select-stories', auth, allow('admin','editor'), wrap(async (req, re
   podcast.storyMomentsStatus = 'queued';
   podcast.storyMomentsMessage = 'Story selection queued';
   podcast.storyMomentsError = undefined;
+  podcast.storyMomentsJobId = undefined;
   await podcast.save();
   try {
     const job = await enqueueStorySelection(podcast.id, req.user.id);
+    await Podcast.updateOne(
+      { _id: podcast._id, storyMomentsStatus: 'queued' },
+      { $set: { storyMomentsJobId: job.id } },
+    );
     res.status(202).json({ message: 'Story selection queued', podcastId: podcast.id, jobId: job.id });
   } catch (error) {
     podcast.storyMomentsStatus = 'failed';
     podcast.storyMomentsMessage = 'Could not queue story moment selection';
     podcast.storyMomentsError = error.message.slice(0, 2000);
+    podcast.storyMomentsJobId = undefined;
     await podcast.save();
     throw error;
   }
@@ -489,6 +525,7 @@ r.post('/:id/opusclip', auth, allow('admin','editor'), wrap(async (req, res) => 
   podcast.opusClipStatus = 'queued';
   podcast.opusClipMessage = 'Waiting for OpusClip worker';
   podcast.opusClipError = undefined;
+  podcast.opusClipJobId = undefined;
   podcast.opusClipProjectId = undefined;
   podcast.opusClipOrgId = undefined;
   podcast.opusClipOpenAiMoments = selectedStoryMoments;
@@ -497,10 +534,15 @@ r.post('/:id/opusclip', auth, allow('admin','editor'), wrap(async (req, res) => 
   let job;
   try {
     job = await enqueueOpusClipProject(podcast.id, req.user.id);
+    await Podcast.updateOne(
+      { _id: podcast._id, opusClipStatus: 'queued' },
+      { $set: { opusClipJobId: job.id } },
+    );
   } catch (error) {
     podcast.opusClipStatus = 'failed';
     podcast.opusClipMessage = 'Could not queue OpusClip generation';
     podcast.opusClipError = error.message.slice(0, 2000);
+    podcast.opusClipJobId = undefined;
     await podcast.save();
     throw error;
   }
@@ -546,12 +588,14 @@ r.post('/:id/cancel-generation', auth, allow('admin','editor'), wrap(async (req,
     stories: {
       statusField: 'storyMomentsStatus',
       messageField: 'storyMomentsMessage',
+      jobIdField: 'storyMomentsJobId',
       jobs: new Set(['select-stories']),
       label: 'Story finding',
     },
     reels: {
       statusField: 'opusClipStatus',
       messageField: 'opusClipMessage',
+      jobIdField: 'opusClipJobId',
       jobs: new Set(['opusclip-generate', 'opusclip-poll']),
       label: 'Reel generation',
     },
@@ -564,31 +608,25 @@ r.post('/:id/cancel-generation', auth, allow('admin','editor'), wrap(async (req,
     return res.status(409).json({ error: `${config.label} is not in progress` });
   }
 
-  const jobs = await mediaQueue.getJobs(['waiting','active','delayed','paused'], 0, -1);
-  const matchingJobs = jobs.filter(job => (
-    config.jobs.has(job.name) && String(job.data?.podcastId) === podcast.id
-  ));
-  let activeCancellation = false;
-  let cancellationRequested = false;
-  for (const job of matchingJobs) {
-    const cancellation = await requestMediaJobCancellation(job);
-    if (cancellation === 'cancelling') {
-      activeCancellation = true;
-      cancellationRequested = true;
-    } else if (cancellation === 'cancelled') {
-      cancellationRequested = true;
-    }
-  }
-  if (!cancellationRequested) {
+  const jobId = podcast[config.jobIdField];
+  const job = jobId ? await mediaQueue.getJob(jobId) : null;
+  if (!job || !config.jobs.has(job.name) || String(job.data?.podcastId) !== podcast.id) {
     return res.status(409).json({ error: 'The generation job could not be found; refresh and try again' });
   }
+  const cancellation = await requestMediaJobCancellation(job);
+  const activeCancellation = cancellation === 'cancelling';
+  const cancellationRequested = activeCancellation || cancellation === 'cancelled';
+  if (!cancellationRequested) return res.status(409).json({ error: `This job is ${cancellation} and cannot be stopped` });
 
   const message = activeCancellation
     ? 'Cancellation requested. Waiting for the worker to stop.'
     : `${config.label} stopped`;
   const updated = await Podcast.updateOne(
     { _id: podcast._id, [config.statusField]: { $in: ['queued','processing'] } },
-    { $set: { [config.statusField]: activeCancellation ? 'processing' : 'cancelled', [config.messageField]: message } }
+    {
+      $set: { [config.statusField]: activeCancellation ? 'processing' : 'cancelled', [config.messageField]: message },
+      ...(!activeCancellation ? { $unset: { [config.jobIdField]: 1 } } : {}),
+    }
   );
   if (!updated.matchedCount) {
     return res.status(409).json({ error: 'The generation status changed while stopping; refresh and try again' });
@@ -753,8 +791,8 @@ r.post('/notifications/:activityId/retry', auth, allow('admin','editor'), wrap(a
   const jobName = event.details?.jobName;
   const retryableJobs = new Set(['transcribe-podcast', 'transcribe-youtube', 'import-youtube', 'select-clips', 'select-stories', 'render-clip', 'opusclip-generate']);
   if (!retryableJobs.has(jobName)) return res.status(400).json({ error: 'This job type cannot be retried from notifications' });
-
   let job;
+  let podcastNeedsSave = true;
   if (jobName === 'render-clip') {
     const clip = await Clip.findById(event.entityId);
     if (!clip || clip.renderStatus !== 'failed') return res.status(409).json({ error: 'Clip is no longer in a retryable state' });
@@ -774,9 +812,18 @@ r.post('/notifications/:activityId/retry', auth, allow('admin','editor'), wrap(a
         return res.status(409).json({ error: 'Story selection is no longer in a retryable state' });
       }
       job = await enqueueStorySelection(podcast.id, req.user.id);
-      podcast.storyMomentsStatus = 'queued';
-      podcast.storyMomentsMessage = 'Story selection queued for retry';
-      podcast.storyMomentsError = undefined;
+      await Podcast.updateOne(
+        { _id: podcast._id, storyMomentsStatus: 'failed' },
+        {
+          $set: {
+            storyMomentsStatus: 'queued',
+            storyMomentsMessage: 'Story selection queued for retry',
+            storyMomentsJobId: job.id,
+          },
+          $unset: { storyMomentsError: 1 },
+        },
+      );
+      podcastNeedsSave = false;
     } else if (jobName === 'select-clips') {
       if (podcast.status !== 'transcribed' || podcast.jobType !== 'select-clips' || Number(podcast.jobProgress) >= 100) {
         return res.status(409).json({ error: 'Clip selection is no longer in a retryable state' });
@@ -801,16 +848,25 @@ r.post('/notifications/:activityId/retry', auth, allow('admin','editor'), wrap(a
         return res.status(409).json({ error: 'Reel generation is no longer in a retryable state' });
       }
       job = await enqueueOpusClipProject(podcast.id, req.user.id);
-      podcast.opusClipStatus = 'queued';
-      podcast.opusClipMessage = 'Reel generation queued for retry';
-      podcast.opusClipError = undefined;
+      await Podcast.updateOne(
+        { _id: podcast._id, opusClipStatus: 'failed' },
+        {
+          $set: {
+            opusClipStatus: 'queued',
+            opusClipMessage: 'Reel generation queued for retry',
+            opusClipJobId: job.id,
+          },
+          $unset: { opusClipError: 1 },
+        },
+      );
+      podcastNeedsSave = false;
     }
-    if (['transcribe-podcast', 'transcribe-youtube', 'import-youtube', 'select-clips'].includes(jobName)) {
+    if (podcastNeedsSave && ['transcribe-podcast', 'transcribe-youtube', 'import-youtube', 'select-clips'].includes(jobName)) {
       podcast.jobId = job.id;
       podcast.jobType = job.name;
       podcast.jobProgress = 0;
     }
-    await podcast.save();
+    if (podcastNeedsSave) await podcast.save();
   }
   await Activity.create({
     user: req.user.id,
@@ -903,7 +959,39 @@ r.get('/:id/youtube-source', auth, wrap(async (req, res) => {
 r.get('/:id', auth, wrap(async (req, res) => { if (!validId(req.params.id)) return res.status(400).json({ error: 'Invalid podcast id' }); const p = await Podcast.findById(req.params.id); if (!p) return res.status(404).json({ error: 'Not found' }); res.json(publicPodcast(p)); }));
 r.get('/:id/clips', auth, wrap(async (req, res) => {
   if (!validId(req.params.id)) return res.status(400).json({ error: 'Invalid podcast id' });
-  res.json((await Clip.find({ podcast: req.params.id }).populate('assignedTo', 'name email role').sort({ score: -1 })).map(publicClip));
+  const filter = { podcast: req.params.id };
+  const paginated = req.query.limit !== undefined || req.query.cursor !== undefined;
+  if (!paginated) {
+    res.json((await Clip.find(filter).populate('assignedTo', 'name email role').sort({ score: -1 })).map(publicClip));
+    return;
+  }
+  const limitValue = req.query.limit === undefined ? 100 : Number(req.query.limit);
+  if (!Number.isSafeInteger(limitValue) || limitValue < 1) return res.status(400).json({ error: 'Page limit must be a positive integer' });
+  const limit = Math.min(limitValue, 100);
+  const conditions = [filter];
+  if (req.query.cursor !== undefined) {
+    if (typeof req.query.cursor !== 'string' || !validId(req.query.cursor)) return res.status(400).json({ error: 'Invalid clip page cursor' });
+    const cursorClip = await Clip.findOne({ _id: req.query.cursor, podcast: req.params.id }).select('_id score').lean();
+    if (!cursorClip) return res.status(400).json({ error: 'Clip page cursor is no longer available' });
+    conditions.push({
+      $or: [
+        ...(Number.isFinite(cursorClip.score)
+          ? [{ score: { $lt: cursorClip.score } }, { score: cursorClip.score, _id: { $lt: cursorClip._id } }]
+          : [{ score: null, _id: { $lt: cursorClip._id } }]),
+      ],
+    });
+  }
+  const query = conditions.length > 1 ? { $and: conditions } : filter;
+  const clips = await Clip.find(query)
+    .populate('assignedTo', 'name email role')
+    .sort({ score: -1, _id: -1 })
+    .limit(limit + 1);
+  const hasMore = clips.length > limit;
+  const items = clips.slice(0, limit);
+  res.json({
+    items: items.map(publicClip),
+    nextCursor: hasMore ? String(items.at(-1)._id) : null,
+  });
 }));
 r.patch('/clips/:clipId', auth, allow('admin','editor'), wrap(async (req, res) => {
   if (!validId(req.params.clipId)) return res.status(400).json({ error: 'Invalid clip id' });
@@ -1042,6 +1130,7 @@ r.get('/:id/export-project', auth, wrap(async (req, res) => {
   if (!resolvedSource.startsWith(rootPrefix)) return res.status(403).json({ error: 'Invalid source media path' });
   const filenameBase = String(podcast.title || 'ClipFinder project').replace(/[<>:"/\\|?*\x00-\x1F]/g, '_').trim() || 'ClipFinder project';
   const fps = 30;
+  const sourceReference = createPortableSourceReference(source.originalName || resolvedSource);
   const durationSeconds = clips.reduce((total, clip) => total + Math.max(0, Number(clip.end || 0) - Number(clip.start || 0)), 0);
 
   if (format === 'json') {
@@ -1049,8 +1138,7 @@ r.get('/:id/export-project', auth, wrap(async (req, res) => {
       name: podcast.title,
       fps,
       source: {
-        name: source.originalName || path.basename(resolvedSource),
-        path: resolvedSource,
+        name: sourceReference.name,
       },
       clips: clips.map(clip => ({
         id: String(clip._id),
@@ -1069,6 +1157,7 @@ r.get('/:id/export-project', auth, wrap(async (req, res) => {
   }
 
   if (format === 'edl') {
+    const sourceName = sourceReference.name;
     let timelineStart = 0;
     const lines = [
       'TITLE: ' + filenameBase,
@@ -1091,7 +1180,7 @@ r.get('/:id/export-project', auth, wrap(async (req, res) => {
     return;
   }
 
-  const sourceName = source.originalName || path.basename(resolvedSource);
+  const sourceName = sourceReference.name;
   const sourceFrames = frame(podcast.duration || durationSeconds, fps);
   let timelineFrames = 0;
   const clipItems = clips.map((clip, index) => {
@@ -1142,7 +1231,7 @@ r.get('/:id/export-project', auth, wrap(async (req, res) => {
         <media>
           <video><track><clipitem><file id="file-1">
             <name>${escapeXml(sourceName)}</name>
-            <pathurl>${escapeXml(pathToFileURL(resolvedSource).href)}</pathurl>
+            <pathurl>${escapeXml(sourceReference.url)}</pathurl>
             <rate><timebase>${fps}</timebase><ntsc>FALSE</ntsc></rate>
             <duration>${sourceFrames}</duration>
             <media><video><samplecharacteristics><width>1080</width><height>1920</height></samplecharacteristics></video></media>

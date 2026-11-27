@@ -44,6 +44,8 @@ The renderer maps each speaker key to the matching uploaded source, seeks each c
 
 The clip editor exposes In/Out values in seconds on the original podcast timeline. Saving a trim updates `start` and `end`; the API rejects an end that is not greater than the start. Caption text and camera plans are editable before render. Press **Render 9:16** to enqueue a render job. Each successful render increments `renderVersion` and updates `renderPath`; prior render files are retained for rollback/audit. Authenticated preview is available through `GET /api/podcasts/clips/:clipId/render`.
 
+Project exports identify source media by filename and do not include the server's absolute storage path. Relink the source file to its local or mounted copy when opening the exported XML project in an editor.
+
 ## Branded captions
 
 The worker creates an ASS subtitle file and burns it into the 1080x1920 output. The default brand is `VANDE DIGITAL`; font and colour settings can be passed to the render endpoint (`brandText`, `fontName`, `primaryColour`, `accentColour`, `outlineColour`). Colours use ASS colour notation, e.g. `&H00FFFFFF`. The hook is displayed briefly at the top and caption text near the lower safe area. Caption timing can be stored as clip-relative `captionSegments` (`[{"start":0,"end":2.4,"text":"..."}]`). If no timed segments exist, the full caption is shown as one subtitle event.

@@ -72,8 +72,14 @@ async function createBackup() {
   try {
     await runMongoDump(uri, path.join(stagingDir, 'database.archive.gz'));
     let mediaIncluded = false;
+    let mediaExists = true;
     try {
       await fs.access(mediaRoot);
+    } catch (error) {
+      if (error.code !== 'ENOENT') throw error;
+      mediaExists = false;
+    }
+    if (mediaExists) {
       const uploadTempRoot = path.join(mediaRoot, '.upload-sessions');
       await fs.cp(mediaRoot, path.join(stagingDir, 'media'), {
         recursive: true,
@@ -84,8 +90,7 @@ async function createBackup() {
         },
       });
       mediaIncluded = true;
-    } catch (error) {
-      if (error.code !== 'ENOENT') throw error;
+    } else {
       console.log(`Media directory not found; database-only backup created (${mediaRoot})`);
     }
     const archive = await fs.stat(path.join(stagingDir, 'database.archive.gz'));

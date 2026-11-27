@@ -29,6 +29,10 @@ API endpoints are mounted under `/api` by `server/src/routes/index.js`; domain r
 
 Podcast analytics and backup/audit endpoints live in `server/src/routes/podcastAnalytics.js` and are mounted under `/api/podcasts/analytics`. The remaining podcast endpoints are still in `podcasts.js`; extract the next cohesive group when its middleware and dependencies can move with it. This incremental approach preserves existing API contracts while the route surface grows.
 
+## Public website and search indexing
+
+`client/index.html` is the static, crawlable marketing homepage. The authenticated React workspace is built separately from `client/app.html`, which is marked `noindex,nofollow`; marketing CTAs link to that app entry. The production static host must serve both HTML entry points and `client/public/robots.txt`. Add an absolute canonical URL, social preview image/URL, and sitemap only after the production domain is finalized; include public pages only.
+
 ## Transcription providers and timing
 
 Sarvam Saaras v4 is the default and returns phrase/chunk timestamps. Deepgram Nova-3 is available as an optional provider (`STT_PROVIDER=deepgram`) and returns word timestamps; it uses multilingual mode for Hindi/English code-switching. Provider accuracy, especially Roman-script Hinglish, still needs comparison on the same authorized sample before choosing a production default. Timing metadata identifies the actual granularity and never invents word timestamps.
@@ -40,7 +44,7 @@ Official docs:
 
 ## Included today
 
-- Email/password login with rate-limited authentication and roles (`admin`, `editor`, `viewer`) with JWT.
+- Email/password login with rate-limited authentication and roles (`admin`, `editor`, `viewer`) with JWT; admin password resets invalidate existing sessions.
 - Podcast records and resumable multi-file uploads to `MEDIA_ROOT` (point this to your office NAS mount). Resumable uploads support files up to 100 GiB by default in 16 MiB chunks; the legacy multipart endpoint retains its separate 5 GiB default cap.
 - Audio extraction using FFmpeg.
 - Long audio split into 25-second REST chunks and sent to the configured STT provider; Sarvam `saaras:v4` is the default and Deepgram Nova-3 is available for word-timing comparisons.

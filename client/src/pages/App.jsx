@@ -23,6 +23,7 @@ import { isPodcastJobActive } from "../components/PodcastJobProgress.jsx";
 import { isSupportedExportFormat } from "../components/TranscriptPanel.jsx";
 import { WorkspaceProvider } from "../context/WorkspaceContext.jsx";
 import api from "../services/apiClient.js";
+import { fetchAllPages } from "../services/paginatedApi.js";
 import {
   chooseLocalMediaDirectory,
   copyAuthenticatedFileToDirectory,
@@ -246,7 +247,7 @@ export default function App() {
 
   async function load() {
     try {
-      const nextPodcasts = (await api.get("/podcasts")).data;
+      const nextPodcasts = await fetchAllPages("/podcasts");
       setPodcasts(nextPodcasts);
       setPodcastsLoadError("");
     } catch (e) {
@@ -291,12 +292,12 @@ export default function App() {
     setRestorePodcastError("");
     Promise.all([
       api.get(`/podcasts/${savedPodcastId}`),
-      api.get(`/podcasts/${savedPodcastId}/clips`),
+      fetchAllPages(`/podcasts/${savedPodcastId}/clips`),
     ])
       .then(([detail, podcastClips]) => {
         if (!active) return;
         setSelected(detail.data);
-        setClips(podcastClips.data);
+        setClips(podcastClips);
       })
       .catch((e) => {
         if (!active) return;
@@ -798,10 +799,10 @@ export default function App() {
       await load();
       const [detail, podcastClips] = await Promise.all([
         api.get(`/podcasts/${podcast._id}`),
-        api.get(`/podcasts/${podcast._id}/clips`),
+        fetchAllPages(`/podcasts/${podcast._id}/clips`),
       ]);
       setSelected(detail.data);
-      setClips(podcastClips.data);
+      setClips(podcastClips);
       setShowRecentPodcasts(false);
       setPage('detail');
       setError(transcriptionWarning
@@ -934,10 +935,10 @@ export default function App() {
     try {
       const [detail, podcastClips] = await Promise.all([
         api.get(`/podcasts/${podcast._id}`),
-        api.get(`/podcasts/${podcast._id}/clips`),
+        fetchAllPages(`/podcasts/${podcast._id}/clips`),
       ]);
       setSelected(detail.data);
-      setClips(podcastClips.data);
+      setClips(podcastClips);
     } catch (e) {
       setError(e.response?.data?.error || "Could not load podcast details");
     }
@@ -1336,7 +1337,7 @@ export default function App() {
     if (selected) {
       const podcast = (await api.get(`/podcasts/${selected._id}`)).data;
       setSelected(podcast);
-      const nextClips = (await api.get(`/podcasts/${selected._id}/clips`)).data;
+      const nextClips = await fetchAllPages(`/podcasts/${selected._id}/clips`);
       setClips(nextClips);
     }
   }

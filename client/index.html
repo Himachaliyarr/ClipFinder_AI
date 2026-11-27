@@ -1,12 +1,128 @@
 <!doctype html>
-<html>
+<html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width,initial-scale=1.0" />
-    <title>ClipFinder AI</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="index,follow" />
+    <meta name="description" content="Turn podcasts, interviews and long-form videos into shareable short clips. Transcribe, find highlights, refine and export in one workspace." />
+    <meta name="theme-color" content="#101113" />
+    <title>AI Podcast Clip Generator | ClipFinder AI</title>
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="ClipFinder AI" />
+    <meta property="og:title" content="AI Podcast Clip Generator | ClipFinder AI" />
+    <meta property="og:description" content="Turn podcasts, interviews and long-form videos into shareable short clips." />
+    <meta name="twitter:card" content="summary" />
+    <meta name="twitter:title" content="AI Podcast Clip Generator | ClipFinder AI" />
+    <meta name="twitter:description" content="Turn podcasts, interviews and long-form videos into shareable short clips." />
+    <link rel="stylesheet" href="./src/marketing.css" />
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "SoftwareApplication",
+        "name": "ClipFinder AI",
+        "applicationCategory": "MultimediaApplication",
+        "operatingSystem": "Web",
+        "description": "A workspace for transcribing long videos, finding clip highlights, refining edits and exporting short-form videos."
+      }
+    </script>
   </head>
   <body>
-    <div id="root"></div>
-    <script type="module" src="/src/main.jsx"></script>
+    <a class="skip-link" href="#main">Skip to main content</a>
+    <header class="site-header">
+      <a class="brand" href="/" aria-label="ClipFinder AI home">
+        <span class="brand-mark" aria-hidden="true">C</span>
+        <span>ClipFinder <strong>AI</strong></span>
+      </a>
+      <nav aria-label="Main navigation">
+        <a href="#how-it-works">How it works</a>
+        <a href="#features">Features</a>
+        <a class="nav-sign-in" href="/app.html">Team sign in</a>
+      </nav>
+    </header>
+
+    <main id="main">
+      <section class="hero" aria-labelledby="hero-title">
+        <div class="hero-copy">
+          <p class="eyebrow">AI VIDEO CLIP WORKSPACE</p>
+          <h1 id="hero-title">Turn long videos into <span>shareable clips.</span></h1>
+          <p class="hero-description">
+            Find the moments worth sharing. ClipFinder AI helps your team move
+            from a full-length podcast or interview to short-form video ready
+            for review and export.
+          </p>
+          <a class="primary-button" href="/app.html">Open your workspace</a>
+          <p class="hero-note">For podcasts, interviews and creator conversations.</p>
+        </div>
+        <div class="workflow-card" aria-label="Sample workflow: long video, AI highlights, short clip ready to export">
+          <p class="workflow-label">A simpler editing workflow</p>
+          <div class="workflow-step">
+            <span class="step-number">01</span>
+            <span><strong>Long video</strong><small>Upload a recording or add a video link</small></span>
+            <span class="step-state" aria-hidden="true">01</span>
+          </div>
+          <div class="workflow-connector" aria-hidden="true"></div>
+          <div class="workflow-step">
+            <span class="step-number">02</span>
+            <span><strong>AI highlights</strong><small>Transcribe and review clip suggestions</small></span>
+            <span class="step-state gold" aria-hidden="true">AI</span>
+          </div>
+          <div class="workflow-connector" aria-hidden="true"></div>
+          <div class="workflow-step">
+            <span class="step-number">03</span>
+            <span><strong>Short clip</strong><small>Refine, render and export your edit</small></span>
+            <span class="step-state ready" aria-hidden="true">✓</span>
+          </div>
+          <p class="workflow-footnote">Suggestions are reviewed by your team before export.</p>
+        </div>
+      </section>
+
+      <section class="section" id="how-it-works" aria-labelledby="workflow-title">
+        <p class="eyebrow">FROM RECORDING TO REEL</p>
+        <h2 id="workflow-title">A clear workflow for repurposing long-form video</h2>
+        <div class="steps-grid">
+          <article>
+            <span class="step-number">01</span>
+            <h3>Add your source</h3>
+            <p>Start with an uploaded video or a supported YouTube link.</p>
+          </article>
+          <article>
+            <span class="step-number">02</span>
+            <h3>Review the moments</h3>
+            <p>Use the transcript and AI-generated suggestions to find promising sections.</p>
+          </article>
+          <article>
+            <span class="step-number">03</span>
+            <h3>Refine and export</h3>
+            <p>Adjust a clip, render a social video and export it for your workflow.</p>
+          </article>
+        </div>
+      </section>
+
+      <section class="feature-section" id="features" aria-labelledby="features-title">
+        <div>
+          <p class="eyebrow">BUILT FOR CREATOR TEAMS</p>
+          <h2 id="features-title">Keep the important steps in one workspace</h2>
+        </div>
+        <ul class="feature-list">
+          <li><strong>Transcript-led editing</strong><span>Review source timings alongside the conversation.</span></li>
+          <li><strong>Human-reviewed suggestions</strong><span>Choose and refine moments before rendering.</span></li>
+          <li><strong>Short-form exports</strong><span>Prepare vertical clips and export project files.</span></li>
+        </ul>
+      </section>
+
+      <section class="closing-cta" aria-labelledby="closing-title">
+        <p class="eyebrow">READY WHEN YOU ARE</p>
+        <h2 id="closing-title">Make more from the videos you already record.</h2>
+        <a class="primary-button" href="/app.html">Sign in to ClipFinder AI</a>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <a class="brand" href="/" aria-label="ClipFinder AI home">
+        <span class="brand-mark" aria-hidden="true">C</span>
+        <span>ClipFinder <strong>AI</strong></span>
+      </a>
+      <span>AI-assisted video clipping for creator teams.</span>
+    </footer>
   </body>
 </html>

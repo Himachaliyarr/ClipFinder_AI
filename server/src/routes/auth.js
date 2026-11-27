@@ -17,7 +17,11 @@ const authLimiter = rateLimit({
 });
 // Keep role and profile data out of tokens; the auth middleware loads the current user.
 const issueToken = (user) =>
-  jwt.sign({ id: user.id }, config.jwtSecret, { expiresIn: "7d" });
+  jwt.sign(
+    { id: user.id, tokenVersion: user.tokenVersion ?? 0 },
+    config.jwtSecret,
+    { expiresIn: "7d" },
+  );
 r.post(
   "/register",
   authLimiter,
@@ -167,19 +171,31 @@ r.patch(
     if (user.email !== email) changedFields.push("email");
     if (user.role !== role) changedFields.push("role");
     if (password) changedFields.push("passwordReset");
-    user.name = name;
-    user.email = email;
-    user.role = role;
-    if (password) user.passwordHash = await bcrypt.hash(password, 12);
-    await user.save();
+    const update = {
+      $set: { name, email, role },
+    };
+    if (password) {
+      update.$set.passwordHash = await bcrypt.hash(password, 12);
+      update.$inc = { tokenVersion: 1 };
+    }
+    const updatedUser = await User.findByIdAndUpdate(user._id, update, {
+      new: true,
+      runValidators: true,
+    });
+    if (!updatedUser) return res.status(404).json({ error: "User not found" });
     await Activity.create({
       user: req.user.id,
       action: "user_updated",
       entityType: "User",
-      entityId: user._id,
+      entityId: updatedUser._id,
       details: { changedFields },
     });
-    res.json({ id: user.id, name: user.name, email: user.email, role: user.role });
+    res.json({
+      id: updatedUser.id,
+      name: updatedUser.name,
+      email: updatedUser.email,
+      role: updatedUser.role,
+    });
   }),
 );
 r.delete(

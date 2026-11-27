@@ -187,7 +187,7 @@ async function processMediaJob(job, signal) {
     if (!podcast) throw new Error('Podcast not found');
     if (!podcast.transcript || !podcast.duration) throw new Error('Podcast needs a saved transcript before story selection');
     await Podcast.findByIdAndUpdate(podcast._id, {
-      $set: { storyMomentsStatus: 'processing', storyMomentsMessage: 'Finding story moments' },
+      $set: { storyMomentsStatus: 'processing', storyMomentsMessage: 'Finding story moments', storyMomentsJobId: job.id },
       $unset: { storyMomentsError: 1 }
     });
     const selected = await selectStories(podcast.transcript, podcast.duration, podcast.segments || [], signal);
@@ -198,7 +198,7 @@ async function processMediaJob(job, signal) {
         storyMomentsStatus: 'completed',
         storyMomentsMessage: `${selected.stories.length} story moments ready`
       },
-      $unset: { storyMomentsError: 1 }
+      $unset: { storyMomentsError: 1, storyMomentsJobId: 1 }
     });
     await Activity.create({
       user: job.data.userId,
@@ -250,7 +250,7 @@ async function processMediaJob(job, signal) {
         storyMomentsStatus: 'idle',
         storyMomentsMessage: 'Click Find story moments to generate story cards.',
       },
-      $unset: { storyMomentsError: 1 }
+      $unset: { storyMomentsError: 1, storyMomentsJobId: 1 }
     });
     await job.updateProgress({ percent: 100, message: transcriptionMessage });
     await Activity.create({
@@ -267,7 +267,7 @@ async function processMediaJob(job, signal) {
     if (!podcast) throw new Error('Podcast not found');
     if (!podcast.transcript || !podcast.duration) throw new Error('Transcribe the podcast before combined reel generation');
     await Podcast.findByIdAndUpdate(podcast._id, {
-      $set: { opusClipStatus: 'processing', opusClipMessage: 'Preparing reel moments for OpusClip' },
+      $set: { opusClipStatus: 'processing', opusClipMessage: 'Preparing reel moments for OpusClip', opusClipJobId: job.id },
       $unset: { opusClipError: 1 }
     });
 
@@ -338,6 +338,7 @@ async function processMediaJob(job, signal) {
       }
     });
     const pollJob = await enqueueOpusClipPoll(podcast.id, job.data.userId);
+    await Podcast.findByIdAndUpdate(podcast._id, { $set: { opusClipJobId: pollJob.id } });
     try {
       assertJobRunning(signal);
     } catch (error) {
@@ -359,7 +360,8 @@ async function processMediaJob(job, signal) {
           opusClipStatus: 'completed',
           opusClipMessage: `${clips.length} OpusClip reels ready`,
           opusClipError: null
-        }
+        },
+        $unset: { opusClipJobId: 1 }
       });
       await Activity.create({
         user: job.data.userId,
@@ -376,7 +378,8 @@ async function processMediaJob(job, signal) {
     if (attempt >= 45) {
       const message = 'OpusClip did not return any reels after 15 minutes';
       await Podcast.findByIdAndUpdate(podcast._id, {
-        $set: { opusClipStatus: 'failed', opusClipMessage: message, opusClipError: message }
+        $set: { opusClipStatus: 'failed', opusClipMessage: message, opusClipError: message },
+        $unset: { opusClipJobId: 1 }
       });
       return { podcastId: podcast.id, clipCount: 0, timedOut: true };
     }
@@ -385,6 +388,7 @@ async function processMediaJob(job, signal) {
       $set: { opusClipStatus: 'processing', opusClipMessage: 'OpusClip is generating reels' }
     });
     const pollJob = await enqueueOpusClipPoll(podcast.id, job.data.userId, attempt + 1);
+    await Podcast.findByIdAndUpdate(podcast._id, { $set: { opusClipJobId: pollJob.id } });
     try {
       assertJobRunning(signal);
     } catch (error) {
@@ -483,13 +487,15 @@ worker.on('failed', async (job, err) => {
     }
     if (err?.code === 'JOB_CANCELLED' && job?.name === 'select-stories') {
       await Podcast.findByIdAndUpdate(job.data.podcastId, {
-        $set: { storyMomentsStatus: 'cancelled', storyMomentsMessage: 'Story finding stopped' }
+        $set: { storyMomentsStatus: 'cancelled', storyMomentsMessage: 'Story finding stopped' },
+        $unset: { storyMomentsJobId: 1 }
       });
       return;
     }
     if (err?.code === 'JOB_CANCELLED' && ['opusclip-generate','opusclip-poll'].includes(job?.name)) {
       await Podcast.findByIdAndUpdate(job.data.podcastId, {
-        $set: { opusClipStatus: 'cancelled', opusClipMessage: 'Reel generation stopped' }
+        $set: { opusClipStatus: 'cancelled', opusClipMessage: 'Reel generation stopped' },
+        $unset: { opusClipJobId: 1 }
       });
       return;
     }
@@ -515,7 +521,8 @@ worker.on('failed', async (job, err) => {
             storyMomentsStatus: 'failed',
             storyMomentsMessage: 'Story selection failed',
             storyMomentsError: 'Story selection failed. Please retry or contact an administrator.'
-          }
+          },
+          $unset: { storyMomentsJobId: 1 }
         });
       }
     }
@@ -527,7 +534,8 @@ worker.on('failed', async (job, err) => {
             opusClipStatus: 'failed',
             opusClipError: err.message.slice(0, 2000),
             opusClipMessage: 'OpusClip reel generation failed'
-          }
+          },
+          $unset: { opusClipJobId: 1 }
         });
       }
     }

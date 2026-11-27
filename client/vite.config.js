@@ -10,6 +10,14 @@ export default defineConfig(({ mode }) => {
 
   return {
     plugins: [react()],
+    build: {
+      rollupOptions: {
+        input: {
+          marketing: fileURLToPath(new URL('./index.html', import.meta.url)),
+          app: fileURLToPath(new URL('./app.html', import.meta.url)),
+        },
+      },
+    },
     server: {
       port: 5173,
       proxy: {

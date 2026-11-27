@@ -5,6 +5,7 @@ const UserSchema = new Schema(
     name: { type: String, required: true },
     email: { type: String, unique: true, required: true },
     passwordHash: { type: String, required: true },
+    tokenVersion: { type: Number, default: 0, min: 0 },
     role: {
       type: String,
       enum: ["admin", "editor", "viewer"],
@@ -67,8 +68,10 @@ const PodcastSchema = new Schema(
     },
     storyMomentsMessage: String,
     storyMomentsError: String,
+    storyMomentsJobId: String,
     opusClipProjectId: String,
     opusClipOrgId: String,
+    opusClipJobId: String,
     opusClipStatus: {
       type: String,
       enum: [
@@ -133,6 +136,8 @@ const ClipSchema = new Schema(
   },
   { timestamps: true },
 );
+PodcastSchema.index({ createdAt: -1, _id: -1 });
+ClipSchema.index({ podcast: 1, score: -1, _id: -1 });
 const ActivitySchema = new Schema(
   {
     user: { type: Schema.Types.ObjectId, ref: "User" },

@@ -50,6 +50,7 @@ export function LoginScreen({ theme, onToggleTheme, onLogin, error }) {
           <Clapperboard size={18} aria-hidden="true" />
           <span>One workspace for stories, reels, and your team.</span>
         </div>
+        <a className="login-text-link" href="/">Back to the public website</a>
       </section>
       <section className="login-panel">
         <form onSubmit={onLogin} aria-labelledby="team-sign-in-heading">
